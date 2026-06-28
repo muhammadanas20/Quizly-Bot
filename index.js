@@ -27,19 +27,34 @@ const { solveQuiz }         = require('./aiHandler');
 const { checkRateLimit, recordRequest, getStats } = require('./rateLimiter');
 
 // ─── WhatsApp Client Setup ────────────────────────────────────────────────────
+const os = require('os');
+
+// Auto-detect platform so the same code works on both Windows and Linux
+const isLinux = os.platform() === 'linux';
+
+const puppeteerArgs = [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-accelerated-2d-canvas',
+    '--no-first-run',
+    '--no-zygote',
+    '--disable-gpu',
+    '--disable-software-rasterizer',
+    '--disable-extensions'
+];
+
 const client = new Client({
-    authStrategy: new LocalAuth(),   // Saves session to disk — no re-scan after restart
+    authStrategy  : new LocalAuth(),
+    authTimeoutMs : 0,   // 0 = wait forever — never timeout on QR scan or auth
+    qrTimeoutMs   : 0,   // 0 = QR code never expires on bot's side
     puppeteer: {
-        headless: true,
-        args: [
-            '--no-sandbox',                // Required on Linux / VPS environments
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',     // Prevents crashes in low-memory environments
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--disable-gpu'
-        ]
+        headless        : true,
+        protocolTimeout : 300000,  // ← THIS is the fix. 5 min for slow servers
+        timeout         : 60000,   // 60s to launch Chrome itself
+        // Only use system Chromium on Linux — let Windows use bundled Chrome
+        ...(isLinux && { executablePath: '/usr/bin/chromium-browser' }),
+        args: puppeteerArgs
     }
 });
 
