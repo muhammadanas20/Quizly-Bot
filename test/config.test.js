@@ -1,0 +1,86 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+import { loadConfig, validateConfig, normalizeId, parseSeedFlags } from '../src/config.js';
+
+test('normalizeId: every spelling of a phone number collapses to digits', () => {
+    const forms = [
+        '923001234567',
+        '+92 300 1234567',
+        '0092-300-1234567',
+        '923001234567@s.whatsapp.net',
+        '923001234567:12@s.whatsapp.net',
+        ' 923001234567 '
+    ];
+    for (const f of forms) assert.equal(normalizeId(f), '923001234567', `failed for "${f}"`);
+});
+
+test('normalizeId: LID jids are preserved (they hold no phone number)', () => {
+    assert.equal(normalizeId('123456789012345@lid'), '123456789012345@lid');
+    assert.equal(normalizeId('123456789012345:3@lid'), '123456789012345@lid');
+});
+
+test('normalizeId: group jids stay distinct from users', () => {
+    assert.notEqual(normalizeId('1234-567@g.us'), normalizeId('1234567@s.whatsapp.net'));
+});
+
+test('normalizeId: junk becomes an empty string, never a match', () => {
+    assert.equal(normalizeId(''), '');
+    assert.equal(normalizeId(null), '');
+    assert.equal(normalizeId(undefined), '');
+});
+
+test('loadConfig: defaults are sane with an empty environment', () => {
+    const cfg = loadConfig({});
+    assert.equal(cfg.quizTrigger, 'quiz');
+    assert.deepEqual(cfg.guardMedia, ['sticker']);
+    assert.equal(cfg.guardEnabled, true);
+    assert.equal(cfg.ackMode, 'react');
+    assert.deepEqual(cfg.aiOrder, ['gemini', 'grok', 'groq']);
+    assert.equal(cfg.gemini.model, 'gemini-2.5-flash');
+    assert.equal(cfg.gemini.thinkingBudget, 0);
+    assert.equal(cfg.grok.model, 'grok-4.5');
+    assert.equal(cfg.ratePerMinute, 12);
+});
+
+test('loadConfig: GROK_API_KEY is accepted as an alias for XAI_API_KEY', () => {
+    const cfg = loadConfig({ GROK_API_KEY: 'xai-key-123' });
+    assert.equal(cfg.grok.key, 'xai-key-123');
+});
+
+test('loadConfig: invalid GUARD_MEDIA falls back to sticker, valid list is kept', () => {
+    assert.deepEqual(loadConfig({ GUARD_MEDIA: 'nonsense' }).guardMedia, ['sticker']);
+    assert.deepEqual(loadConfig({ GUARD_MEDIA: 'sticker, link, ALL' }).guardMedia, ['sticker', 'link', 'all']);
+});
+
+test('loadConfig: STICKER_GUARD=off disables the guard', () => {
+    assert.equal(loadConfig({ STICKER_GUARD: 'off' }).guardEnabled, false);
+    assert.equal(loadConfig({ STICKER_GUARD: 'on' }).guardEnabled, true);
+});
+
+test('loadConfig: owners and whitelist are normalised', () => {
+    const cfg = loadConfig({ OWNER_NUMBERS: '+92 300 1234567, 923009876543', GUARD_WHITELIST: '923111111111' });
+    assert.deepEqual(cfg.owners, ['923001234567', '923009876543']);
+    assert.deepEqual(cfg.guardWhitelist, ['923111111111']);
+});
+
+test('parseSeedFlags: "number:label" pairs', () => {
+    const seeds = parseSeedFlags('923001234567:Ali, +923009876543');
+    assert.equal(seeds.length, 2);
+    assert.equal(seeds[0].label, 'Ali');
+    assert.ok(seeds[0].ids.has('923001234567'));
+    assert.equal(seeds[1].label, '');
+});
+
+test('validateConfig: fails with no keys, warns with no owner', () => {
+    const v = validateConfig(loadConfig({}));
+    assert.equal(v.ok, false);
+    assert.match(v.errors[0], /No AI provider key/);
+    assert.ok(v.warnings.some((w) => /OWNER_NUMBERS/.test(w)));
+});
+
+test('validateConfig: passes with a single key and reports which provider', () => {
+    const v = validateConfig(loadConfig({ GEMINI_API_KEY: 'k', OWNER_NUMBERS: '923001234567' }));
+    assert.equal(v.ok, true);
+    assert.deepEqual(v.usableProviders, ['gemini']);
+});
