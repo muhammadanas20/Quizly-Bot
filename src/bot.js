@@ -49,6 +49,8 @@ export async function startBot({ config, log, fetchImpl }) {
     let attempts = 0;
     let stopped = false;
     let pairingRequested = false;
+    let reconnectTimer = null;
+    let reconnectScheduled = false;
 
     const groups = createGroupCache({
         sock  : { groupMetadata: (jid) => sock.groupMetadata(jid) },
@@ -158,10 +160,27 @@ export async function startBot({ config, log, fetchImpl }) {
                     stopped = true;
                     process.exit(1);
                 }
-                const wait = Math.min(RECONNECT_BASE_MS * 2 ** attempts, RECONNECT_MAX_MS);
+                // Baileys deliberately closes the stream with 515 after a
+                // pairing code is accepted. This is a restart signal, not a
+                // failed pairing; reconnect immediately using the saved creds.
+                if (reconnectScheduled || stopped) return;
+                const pairingRestart = status === 515;
+                const wait = pairingRestart
+                    ? 0
+                    : Math.min(RECONNECT_BASE_MS * 2 ** attempts, RECONNECT_MAX_MS);
                 attempts++;
-                log.warn(`connection closed (status=${status ?? 'none'}) — reconnecting in ${Math.round(wait / 1000)}s`);
-                setTimeout(connect, wait).unref?.();
+                reconnectScheduled = true;
+                if (pairingRestart) {
+                    log.info('pairing completed; restarting the WhatsApp connection');
+                } else {
+                    log.warn(`connection closed (status=${status ?? 'none'}) — reconnecting in ${Math.round(wait / 1000)}s`);
+                }
+                reconnectTimer = setTimeout(() => {
+                    reconnectScheduled = false;
+                    reconnectTimer = null;
+                    connect().catch((err) => log.error(`reconnect failed: ${err.message}`));
+                }, wait);
+                reconnectTimer.unref?.();
             }
         });
 
@@ -187,6 +206,9 @@ export async function startBot({ config, log, fetchImpl }) {
     async function stop(reason = 'manual', { exit = false } = {}) {
         if (stopped) return;
         stopped = true;
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+        reconnectScheduled = false;
         log.warn(`shutting down (${reason})`);
         flags.flush();
         try { await sock?.end?.(); } catch { /* ignore */ }
