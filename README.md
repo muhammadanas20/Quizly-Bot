@@ -38,7 +38,7 @@ The bot reacts 👀 to your message, then posts:
 2) C — Islamabad
 3) A — 96
 
-_gemini · gemini-2.5-flash · 2.8s_
+_groq · meta-llama/llama-4-scout-17b-16e-instruct · 1.2s_
 ```
 
 then flips your message to ✅. Every question is read, given a one-line reason, and
@@ -77,6 +77,17 @@ sticker arrives
 | `!stats` | anyone | deletions, AI usage, memory, uptime |
 | `!ping` | anyone | latency + memory |
 
+Every owner command answers with a **reaction on your command message** — 🚩 when
+someone is flagged, ✅ when the flag is lifted, ℹ️ when there was nothing to remove,
+⛔ when you are not the owner — followed by a one-line reply naming the member. You
+never have to wonder whether the command landed.
+
+You can type them from **your own number or from the bot's account** — the phone the
+bot runs on is the natural place to type `!flag`, and commands sent by the bot's own
+account are treated as owner commands (that account only exists on hardware you
+control). The quiz solver still ignores the bot's own messages, otherwise its own
+answer — which quotes the quiz image — would be solved again forever.
+
 Flagged members can also be seeded from code in `.env`:
 
 ```env
@@ -114,8 +125,9 @@ already running the bot, use `pm2 restart quizly` instead of starting a second c
 
 ## AI providers
 
-`AI_ORDER=gemini,grok,groq` — the bot tries them in that order and falls through on
-failure. Only providers with a key in `.env` are used.
+`AI_ORDER=groq,gemini,grok` — the bot tries them in that order and falls through on
+failure. Only providers with a key in `.env` are used. Groq leads because it answers a
+quiz image in about a second; Gemini and Grok are the heavier hitters behind it.
 
 | Provider | Env key | Default model | Get a key |
 |---|---|---|---|
@@ -129,7 +141,16 @@ tells you if the one in `.env` is missing. Each provider also has a
 instead of failing every quiz.
 
 Speed knobs already set for you: `GEMINI_THINKING_BUDGET=0` (no reasoning tokens on
-2.5-*, roughly 2–4× faster) and `XAI_REASONING_EFFORT=low`.
+2.5-*, roughly 2–4× faster), `XAI_REASONING_EFFORT=low`, and `AI_MAX_TOKENS=2400` — a
+ceiling, not a target, so it never slows a short answer down but a 30-question quiz still
+fits.
+
+**Answers are never dropped.** Whatever comes back is parsed in four passes: strict JSON,
+then a repaired document (a truncated answer is closed up so the questions that did fit
+are still shown), then raw `key: value` pairs, then numbered prose. Only if all four fail
+is the raw text posted, so a chatty model costs you formatting, never the answers. When
+the model runs into the output limit the bot says so instead of pretending the quiz was
+shorter than it is.
 
 ---
 
@@ -176,10 +197,13 @@ Check it yourself on the VM: `pm2 monit` or `free -h`.
 | 6 | Rate limiter was hard-wired to Groq's free-tier numbers | Configurable, provider-independent |
 | 7 | Nothing persisted; a restart lost all state | Flag list on disk, session on disk, PM2 auto-restart |
 | 8 | Replies were one blob of `REASONING:` then `ANSWERS:` | Per-question *question → reason → answer*, chunked on question boundaries |
+| 9 | When the model's JSON did not parse, the raw JSON was posted into the group (`{"questions":[{"n":1,…`) — and it happened whenever the answer was cut off by the token limit, which is most long quizzes | Four-pass parser (strict JSON → repaired document → key/value pairs → numbered prose), a token ceiling that actually fits a long quiz, and a warning instead of a silent short answer |
+| 10 | `!flag` / `!unflag` typed from the bot's own account were silently dropped — the router returned `own` before the command handler ran, so the command did nothing at all and gave no feedback | Own-account commands are processed as owner commands, and every owner command answers with a reaction on the command message (🚩 / ✅ / ℹ️ / ⛔) |
+| 11 | A flag set from an `@mention` was stored under the LID only, while the same person's messages arrive by phone number — so the guard could miss them and `!unflag` by number reported "not flagged" | Every target is stored under **all** of its identities (phone number + LID), the guard aliases any new identity it sees onto the entry, and the label uses the member's name instead of a raw LID |
 
 > **What I could not verify here.** This sandbox has no outbound internet, no WhatsApp
 > number and no API keys, so I could not complete a live login or a real Gemini/Grok call.
-> What *is* verified: 157 unit and integration tests over the guard, the router, the
+> What *is* verified: 183 unit and integration tests over the guard, the router, the
 > formatting, the provider request shapes and the fallback logic; a real process boot
 > (socket constructed, reconnect backoff, clean shutdown); and every request body asserted
 > against the documented API shapes. Two claims I made earlier about the old code were

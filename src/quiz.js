@@ -163,15 +163,40 @@ export function createQuizHandler({ sock, config, log, limiter, inflight, downlo
 
             // ── render ──────────────────────────────────────────────────────
             const parsed = parseQuizResult(result.text);
-            const rendered = renderQuiz({ ...parsed, provider: result.provider, model: result.model, ms: result.ms });
+            const rendered = renderQuiz({
+                ...parsed,
+                provider : result.provider,
+                model    : result.model,
+                ms       : result.ms,
+                truncated: result.truncated
+            });
 
             if (!rendered) {
+                // The model read the image but found nothing answerable — say so
+                // in words instead of posting the empty JSON back at the group.
+                if (parsed.questions.length === 0 && parsed.unreadable.length) {
+                    await sock.sendMessage(jid, {
+                        text:
+                            `🤔 *Could not read any question in that image.*\n${parsed.unreadable.join(' · ')}\n\n` +
+                            '💡 A sharper, uncropped screenshot works best.'
+                    });
+                    await react(msg, '❌');
+                    log.warn(`quiz: no readable question in "${chatName}" via ${result.provider}`);
+                    return { ok: false, provider: result.provider, questions: 0, error: 'no readable question' };
+                }
+
                 // The model answered but not in a usable shape — never drop it.
                 const fallback = `*Quiz solved* (${result.provider})\n\n${result.text}`.slice(0, 3800);
                 await sendChunks(jid, fallback, msg.key);
                 await react(msg, '✅');
                 log.warn(`quiz: unparsed model output in "${chatName}" — sent raw text`);
                 return { ok: true, provider: result.provider, questions: 0, unparsed: true };
+            }
+
+            if (result.truncated) {
+                log.warn(`quiz: ${result.provider} hit its output limit in "${chatName}" — later questions may be missing`);
+            } else if (parsed.repaired) {
+                log.debug(`quiz: repaired malformed JSON from ${result.provider} in "${chatName}"`);
             }
 
             const parts = await sendChunks(jid, rendered, msg.key);

@@ -5,6 +5,8 @@
  * plain value, which is what makes the guard and the quiz trigger testable.
  */
 
+import { normalizeId } from './config.js';
+
 /** Message types WhatsApp wraps in an envelope before the real payload. */
 const WRAPPERS = [
     'ephemeralMessage',
@@ -110,6 +112,42 @@ export function bareJid(jid) {
     const at = s.lastIndexOf('@');
     if (at < 0) return s.split(':')[0];
     return `${s.slice(0, at).split(':')[0]}@${s.slice(at + 1)}`;
+}
+
+/**
+ * Every identity one JID can be known by.
+ *
+ * Baileys 7 addresses the same human by phone-number JID or by LID, and which
+ * one you get depends on the group: a mention in `contextInfo.mentionedJid` is
+ * usually a LID, while `key.participant` is usually the phone number. A flag
+ * stored under one and looked up under the other silently misses — which is
+ * how "!flag worked but the sticker stayed" and "!unflag says not flagged"
+ * happen. The socket's lid-mapping store translates when it can; `sock` is
+ * optional so this stays pure in tests.
+ *
+ * @returns {string[]} normalised identities, at least the input's own
+ */
+export function identitiesOf(jid, sock) {
+    const out = new Set();
+    const push = (v) => { const n = normalizeId(v); if (n) out.add(n); };
+    const raw = String(jid || '');
+
+    push(raw);
+    try {
+        const mapping = sock?.signalRepository?.lidMapping;
+        if (mapping) {
+            if (raw.endsWith('@lid')) {
+                push(mapping.getPNForLID?.(raw));
+            } else {
+                // the mapping wants a full JID, but `!flag 923001234567` hands
+                // us bare digits — build the phone-number JID it expects
+                const pnJid = raw.includes('@') ? raw : `${normalizeId(raw)}@s.whatsapp.net`;
+                push(mapping.getLIDForPN?.(pnJid));
+            }
+        }
+    } catch { /* the mapping store is optional — never let it break a command */ }
+
+    return [...out];
 }
 
 /** "1234-567890@g.us" → true */

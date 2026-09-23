@@ -13,6 +13,7 @@
  */
 
 import { normalizeId, GUARD_KINDS } from './config.js';
+import { identitiesOf } from './message.js';
 
 export const PREFIX = '!';
 export const OWNER_ONLY = new Set(['flag', 'unflag', 'flags', 'guard']);
@@ -31,6 +32,12 @@ const ALIASES = {
 const CANONICAL = Object.fromEntries(
     Object.entries(ALIASES).flatMap(([canon, names]) => names.map((n) => [n, canon]))
 );
+
+/** Identity expansion with no socket: the JID's own normalised form only. */
+const defaultExpand = (raw) => {
+    const id = normalizeId(raw);
+    return id ? [id] : [];
+};
 
 /** "  !flag @Ali spamming  " → { name:'flag', args:['@Ali','spamming'] } */
 export function parseCommand(text) {
@@ -64,30 +71,70 @@ export const HELP_TEXT = [
 ].join('\n');
 
 export function createCommandHandler({ config, flags, log, guard, limiter, groups, solveNow, startedAt }) {
-    /** Resolve "!flag" targets: a mention wins, then a typed number. */
-    function resolveTargets({ args = [], mentioned = [], quotedParticipant = null } = {}) {
-        if (mentioned?.length) return mentioned.map((m) => ({ raw: m, id: normalizeId(m) })).filter((t) => t.id);
+    /**
+     * Resolve "!flag" / "!unflag" targets: a mention wins, then a typed number.
+     *
+     * Each target carries EVERY identity that person can be known by (phone
+     * number and LID), because `!flag @someone` is keyed by the JID WhatsApp
+     * puts in the mention while the guard later matches on whatever the
+     * sender's message carries. Storing both is what makes flag and unflag
+     * agree with each other.
+     */
+    function resolveTargets({ args = [], mentioned = [], quotedParticipant = null, expand = defaultExpand } = {}) {
         const out = [];
-        for (const a of args) {
-            const id = normalizeId(a);
-            if (id) out.push({ raw: a, id });
+        const seen = new Set();
+
+        const add = (raw) => {
+            const ids = expand(raw).filter(Boolean);
+            if (!ids.length) return;
+            const key = ids.join('|');
+            if (seen.has(key)) return;
+            seen.add(key);
+            out.push({ raw, ids });
+        };
+
+        if (mentioned?.length) {
+            for (const m of mentioned) add(m);
+            return out;
         }
-        if (!out.length && quotedParticipant) {
-            const id = normalizeId(quotedParticipant);
-            if (id) out.push({ raw: quotedParticipant, id });
-        }
+        for (const a of args) add(a);
+        if (!out.length && quotedParticipant) add(quotedParticipant);
         return out;
     }
 
+    /** "Muhammad Anas" when the group metadata knows them, else the bare id. */
+    async function displayName(target, ctx) {
+        for (const id of target.ids) {
+            const name = await ctx.groups?.nameOf?.(ctx.jid, id);
+            if (name) return name;
+        }
+        return String(target.raw).replace(/@.*/, '');
+    }
+
     /**
-     * @returns {Promise<{handled:boolean, reply?:string|null}>}
+     * "@Muhammad Anas test" → "test". WhatsApp folds the mention's display name
+     * into the plain text, so it arrives in the args and would otherwise end up
+     * as the flag's reason.
+     */
+    function stripMentionNames(text, names) {
+        let out = ` ${String(text || '')} `;
+        for (const n of names) {
+            if (!n) continue;
+            out = out.replace(new RegExp(`@\\s*${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'gi'), ' ');
+        }
+        return out.replace(/\s+/g, ' ').trim();
+    }
+
+    /**
+     * @returns {Promise<{handled:boolean, reply?:string|null, react?:string}>}
+     *          `react` is the emoji the router puts on the command message.
      */
     async function handle(ctx) {
         const cmd = parseCommand(ctx.text);
         if (!cmd) return { handled: false };
 
         if (OWNER_ONLY.has(cmd.name) && !ctx.isOwner) {
-            return { handled: true, reply: '⛔ Only the bot owner can use that command.' };
+            return { handled: true, react: '⛔', reply: '⛔ Only the bot owner can use that command.' };
         }
 
         switch (cmd.name) {
@@ -136,10 +183,11 @@ export function createCommandHandler({ config, flags, log, guard, limiter, group
                 const targets = resolveTargets({
                     args             : cmd.args,
                     mentioned        : ctx.mentioned,
-                    quotedParticipant: ctx.quotedParticipant
+                    quotedParticipant: ctx.quotedParticipant,
+                    expand           : ctx.expandIds
                 });
                 if (!targets.length) {
-                    return { handled: true, reply: `Usage: ${PREFIX}flag <@person or number> [reason]` };
+                    return { handled: true, react: '⚠️', reply: `Usage: ${PREFIX}flag <@person or number> [reason]` };
                 }
                 // "media=sticker,link" overrides the global GUARD_MEDIA for this person
                 const mediaArg = cmd.args.find((a) => /^media=/i.test(a));
@@ -147,26 +195,30 @@ export function createCommandHandler({ config, flags, log, guard, limiter, group
                     ? mediaArg.slice(6).split(',').map((k) => k.trim().toLowerCase()).filter((k) => GUARD_KINDS.includes(k))
                     : null;
 
-                const reason = cmd.args
-                    .filter((a) => !normalizeId(a) && !/^media=/i.test(a))
-                    .join(' ')
-                    .slice(0, 120);
+                const names = [];
+                for (const t of targets) names.push(await displayName(t, ctx));
+
+                const reason = stripMentionNames(
+                    cmd.args.filter((a) => !normalizeId(a) && !/^media=/i.test(a)).join(' '),
+                    names
+                ).slice(0, 120);
 
                 const done = [];
-                for (const t of targets) {
-                    flags.add(new Set([t.id]), {
-                        label  : t.raw.replace(/@.*/, ''),
+                targets.forEach((t, i) => {
+                    flags.add(new Set(t.ids), {
+                        label  : names[i],
                         reason,
                         media,
                         addedBy: ctx.senderLabel
                     });
-                    done.push(t.raw);
-                }
+                    done.push(names[i]);
+                });
 
                 const applies = media?.length ? media.join('/') : config.guardMedia.join('/');
                 return {
                     handled: true,
-                    reply: `🚩 Flagged ${done.join(', ')}.\nTheir ${applies} will be removed silently in groups where the bot is admin.`
+                    react  : '🚩',
+                    reply  : `🚩 Flagged ${done.join(', ')}.\nTheir ${applies} will be removed silently in groups where the bot is admin.`
                 };
             }
 
@@ -174,17 +226,22 @@ export function createCommandHandler({ config, flags, log, guard, limiter, group
                 const targets = resolveTargets({
                     args             : cmd.args,
                     mentioned        : ctx.mentioned,
-                    quotedParticipant: ctx.quotedParticipant
+                    quotedParticipant: ctx.quotedParticipant,
+                    expand           : ctx.expandIds
                 });
-                if (!targets.length) return { handled: true, reply: `Usage: ${PREFIX}unflag <@person or number>` };
+                if (!targets.length) {
+                    return { handled: true, react: '⚠️', reply: `Usage: ${PREFIX}unflag <@person or number>` };
+                }
                 const done = [];
                 const missed = [];
                 for (const t of targets) {
-                    const r = flags.remove(new Set([t.id]));
-                    (r.ok ? done : missed).push(t.raw);
+                    const r = flags.remove(new Set(t.ids));
+                    (r.ok ? done : missed).push(await displayName(t, ctx));
                 }
                 return {
                     handled: true,
+                    // a partial removal is still a change worth confirming
+                    react: done.length ? '✅' : 'ℹ️',
                     reply: [
                         done.length ? `✅ Unflagged ${done.join(', ')}.` : null,
                         missed.length ? `ℹ️ Not flagged: ${missed.join(', ')}.` : null
@@ -197,14 +254,19 @@ export function createCommandHandler({ config, flags, log, guard, limiter, group
                 if (what === 'status') {
                     return {
                         handled: true,
-                        reply: `Guard is ${config.guardEnabled ? 'ON' : 'OFF'} · removing: ${config.guardMedia.join(', ')} · ${flags.count} flagged`
+                        react  : '📊',
+                        reply  : `Guard is ${config.guardEnabled ? 'ON' : 'OFF'} · removing: ${config.guardMedia.join(', ')} · ${flags.count} flagged`
                     };
                 }
                 const want = what === 'on' || what === 'off' ? what === 'on' : null;
-                if (want === null) return { handled: true, reply: `Usage: ${PREFIX}guard on|off|status` };
+                if (want === null) return { handled: true, react: '⚠️', reply: `Usage: ${PREFIX}guard on|off|status` };
                 config.guardEnabled = want;
                 log.info(`guard toggled ${want ? 'ON' : 'OFF'} by ${ctx.senderLabel}`);
-                return { handled: true, reply: `Guard is now ${want ? 'ON' : 'OFF'}.` };
+                return {
+                    handled: true,
+                    react  : want ? '🛡️' : '🔕',
+                    reply  : `Guard is now ${want ? 'ON' : 'OFF'}.`
+                };
             }
 
             case 'quiz': {

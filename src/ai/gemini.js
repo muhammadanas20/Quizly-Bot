@@ -65,6 +65,8 @@ export async function callGemini({ apiKey, model, image, prompt, timeoutMs, maxT
     }
 
     const candidate = res.json?.candidates?.[0];
+    const finishReason = candidate?.finishReason || '';
+
     if (candidate?.finishReason === 'SAFETY') {
         throw new AiError('image blocked by safety filters', {
             status: 200, provider: 'gemini', model, kind: 'bad_request'
@@ -77,12 +79,18 @@ export async function callGemini({ apiKey, model, image, prompt, timeoutMs, maxT
         .trim();
 
     if (!text) {
-        throw new AiError(`empty response (finishReason=${candidate?.finishReason || 'none'})`, {
+        throw new AiError(`empty response (finishReason=${finishReason || 'none'})`, {
             status: 200, provider: 'gemini', model, kind: 'unknown', retryable: true
         });
     }
 
-    return { provider: 'gemini', model, text, usage: res.json?.usageMetadata || null };
+    // MAX_TOKENS means the JSON was cut in half — the parser salvages what it
+    // can, but the caller should warn that later questions may be missing.
+    return {
+        provider: 'gemini', model, text, finishReason,
+        truncated: finishReason === 'MAX_TOKENS',
+        usage: res.json?.usageMetadata || null
+    };
 }
 
 export default callGemini;

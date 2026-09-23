@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseQuizResult, renderQuiz, chunkText } from '../src/format.js';
+import { parseQuizResult, renderQuiz, chunkText, repairJson } from '../src/format.js';
 
 const sample = {
     questions: [
@@ -58,11 +58,93 @@ test('parseQuizResult: salvages numbered prose when JSON parsing fails', () => {
     assert.equal(r.questions[0].answer, 'Paris');
 });
 
+test('parseQuizResult: salvages markdown prose with the answer on its own line', () => {
+    const r = parseQuizResult('**Q1.** What is 2 + 2?\n- Answer: 4\n\n**Q2.** Capital of Pakistan?\n- Answer: Islamabad');
+    assert.equal(r.parsed, true);
+    assert.deepEqual(r.questions.map((q) => [q.n, q.question, q.answer]), [
+        [1, 'What is 2 + 2?', '4'],
+        [2, 'Capital of Pakistan?', 'Islamabad']
+    ]);
+});
+
 test('parseQuizResult: gives up cleanly on garbage (caller sends raw text)', () => {
     const r = parseQuizResult('I cannot see an image.');
     assert.equal(r.parsed, false);
     assert.equal(r.questions.length, 0);
     assert.equal(r.raw, 'I cannot see an image.');
+});
+
+// ── the failures that actually reach production ──────────────────────────────
+test('parseQuizResult: a response cut off by the token limit still yields every complete question', () => {
+    // exactly what Gemini returns when maxOutputTokens runs out mid-question
+    const truncated = `{
+  "questions": [
+    {
+      "n": 1,
+      "question": "Question # 1: a. Let p, q be propositions. What is ¬(p ∧ q)?",
+      "reason": "De Morgan's law.",
+      "answer": "B — ¬p ∨ ¬q"
+    },
+    {
+      "n": 2,
+      "question": "Question # 2: Which data structure is FIFO?",
+      "reason": "A queue serves in arrival order.",
+      "answer": "C — Queue"
+    },
+    {
+      "n": 3,
+      "question": "Question # 3: A. Let p`;
+
+    const r = parseQuizResult(truncated);
+    assert.equal(r.parsed, true);
+    assert.equal(r.repaired, true);
+    assert.equal(r.questions.length, 2);
+    assert.equal(r.questions[1].answer, 'C — Queue');
+    // the half-written question is reported missing, never invented
+    assert.match(r.unreadable.join(' '), /Q3/);
+});
+
+test('parseQuizResult: raw newlines inside a value are escaped, not fatal', () => {
+    const sloppy = '{\n  "questions": [\n    {\n      "n": 1,\n      "question": "Line one\nstill line one",\n      "reason": "r",\n      "answer": "A — x"\n    }\n  ]\n}';
+    const r = parseQuizResult(sloppy);
+    assert.equal(r.parsed, true);
+    assert.equal(r.questions[0].question, 'Line one still line one');
+});
+
+test('parseQuizResult: trailing comma and a dangling key are repaired', () => {
+    const r = parseQuizResult('{"questions":[{"n":1,"question":"q","reason":"r","answer":"A"},],}');
+    assert.equal(r.parsed, true);
+    assert.equal(r.questions.length, 1);
+    assert.equal(r.questions[0].answer, 'A');
+});
+
+test('parseQuizResult: unclosed objects and arrays are closed up', () => {
+    const r = parseQuizResult('{"questions":[{"n":1,"question":"q","reason":"r","answer":"A"}');
+    assert.equal(r.parsed, true);
+    assert.equal(r.questions[0].answer, 'A');
+});
+
+test('parseQuizResult: Python-style single quotes are read as key/value pairs', () => {
+    const r = parseQuizResult("{'questions': [{'n': 1, 'question': 'Largest planet?', 'reason': 'Jupiter is biggest.', 'answer': 'D — Jupiter'}]}");
+    assert.equal(r.parsed, true);
+    assert.equal(r.questions[0].question, 'Largest planet?');
+    assert.equal(r.questions[0].answer, 'D — Jupiter');
+});
+
+test('parseQuizResult: prose after a complete JSON object is ignored', () => {
+    const r = parseQuizResult(`${JSON.stringify(sample)}\n\nHope this helps! Let me know if you need more detail.`);
+    assert.equal(r.parsed, true);
+    assert.equal(r.questions.length, 2);
+});
+
+test('repairJson: refuses to invent a document out of prose', () => {
+    assert.equal(repairJson('I cannot see an image.'), null);
+    assert.equal(repairJson(''), null);
+});
+
+test('repairJson: closes a truncated array element and keeps earlier ones', () => {
+    const out = repairJson('{"questions":[{"n":1,"answer":"A"},{"n":2,"answer":"B"');
+    assert.deepEqual(JSON.parse(out).questions.map((q) => q.answer), ['A', 'B']);
 });
 
 test('renderQuiz: question → one-line reason → answer, in order', () => {
@@ -101,6 +183,12 @@ test('renderQuiz: missing reason is skipped, missing answer is flagged', () => {
 
 test('renderQuiz: null when there is nothing to send', () => {
     assert.equal(renderQuiz({ questions: [] }), null);
+});
+
+test('renderQuiz: warns when the answer hit the output limit', () => {
+    const out = renderQuiz({ ...sample, truncated: true });
+    assert.match(out, /output limit/);
+    assert.equal(renderQuiz({ ...sample }).includes('output limit'), false);
 });
 
 test('chunkText: short text is one message', () => {

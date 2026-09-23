@@ -12,7 +12,7 @@
  * live WhatsApp socket.
  */
 
-import { classifyKind } from './message.js';
+import { classifyKind, identitiesOf } from './message.js';
 import { normalizeId } from './config.js';
 
 const NOTHING_TO_DELETE = new Set(['system', 'reaction', 'unknown']);
@@ -62,20 +62,13 @@ export function decide({
  */
 export function collectSenderIds(msg, sock) {
     const out = new Set();
-    const push = (v) => { const n = normalizeId(v); if (n) out.add(n); };
-
-    push(msg?.key?.participant);
-    push(msg?.key?.participantAlt);
-    if (!msg?.key?.participant) push(msg?.key?.remoteJid);
-
-    try {
-        const mapping = sock?.signalRepository?.lidMapping;
-        for (const jid of [msg?.key?.participant, msg?.key?.participantAlt]) {
-            if (!jid || !String(jid).endsWith('@lid')) continue;
-            push(mapping?.getPNForLID?.(jid));
-        }
-    } catch { /* the mapping store is optional — never let it break the guard */ }
-
+    for (const jid of [msg?.key?.participant, msg?.key?.participantAlt]) {
+        for (const id of identitiesOf(jid, sock)) out.add(id);
+    }
+    // In a 1-on-1 chat the sender is the chat itself.
+    if (!msg?.key?.participant) {
+        for (const id of identitiesOf(msg?.key?.remoteJid, sock)) out.add(id);
+    }
     return out;
 }
 
@@ -116,6 +109,14 @@ export function createGuard({ sock, flags, config, log, isAdmin }) {
 
         const started = Date.now();
         await sock.sendMessage(jid, { delete: msg.key });
+
+        // Learn every identity this person has just shown us. A flag set from
+        // an @mention is keyed by LID; the same person's next message may only
+        // carry the phone number. Storing both means a later !unflag by either
+        // form finds the flag instead of reporting "not flagged".
+        for (const id of senderIds) {
+            if (verdict.entry && !verdict.entry.keys.includes(id)) flags.alias?.(senderIds, id);
+        }
 
         const label = verdict.entry?.label || sender;
         const total = flags.bumpDeleted(senderIds);
