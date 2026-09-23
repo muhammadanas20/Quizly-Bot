@@ -111,6 +111,61 @@ test('router: the bot never reacts to its own message', async () => {
     assert.equal(sent.length, 0);
 });
 
+// ── commands typed on the bot's own account ──────────────────────────────────
+// Driving the bot from the phone it runs on is the normal thing to do, and it
+// used to be silently dropped: the router returned `own` before the command
+// handler ever ran, so !flag / !unflag appeared to do nothing at all.
+const ownCmd = (text, mentioned = []) => ({
+    key    : { remoteJid: GROUP, participant: BOT, fromMe: true, id: 'OWN1' },
+    message: mentioned.length
+        ? { extendedTextMessage: { text, contextInfo: { mentionedJid: mentioned } } }
+        : { conversation: text }
+});
+
+test('router: !flag typed on the bot\'s own account still flags, and confirms with a reaction', async () => {
+    const { router, flags, sent, reacts } = world();
+    const res = await router.processMessage(ownCmd('!flag 923009876543 sticker spam'));
+
+    assert.deepEqual(res, { command: 'flag' });
+    assert.equal(flags.has(new Set(['923009876543'])), true);
+    assert.deepEqual(reacts(), ['🚩'], 'the reaction is the confirmation');
+    assert.match(sent.find((s) => s.content.text).content.text, /Flagged 923009876543/);
+});
+
+test('router: !unflag typed on the bot\'s own account still unflags', async () => {
+    const { router, flags, reacts, texts } = world();
+    flags.add(new Set(['923009876543']), { label: 'Spammer' });
+
+    await router.processMessage(ownCmd('!unflag 923009876543'));
+
+    assert.equal(flags.has(new Set(['923009876543'])), false);
+    assert.deepEqual(reacts(), ['✅']);
+    assert.match(texts()[0], /Unflagged 923009876543/);
+});
+
+test('router: !flag by @mention from the bot\'s own account resolves the mention', async () => {
+    const { router, flags } = world();
+    await router.processMessage(ownCmd('!flag @Ali spam', ['923009876543@s.whatsapp.net']));
+    assert.equal(flags.has(new Set(['923009876543'])), true);
+});
+
+test('router: the bot\'s own quiz trigger never re-solves its own answer', async () => {
+    // the bot's answer quotes the quiz image, so re-processing it would loop
+    const { router, sent } = world();
+    const res = await router.processMessage({
+        key    : { remoteJid: GROUP, participant: BOT, fromMe: true, id: 'OWN2' },
+        message: {
+            extendedTextMessage: {
+                text       : '*Quiz solved* · 1 question',
+                contextInfo: { stanzaId: 'Q1', quotedMessage: { imageMessage: { url: 'u' } } }
+            }
+        }
+    });
+
+    assert.deepEqual(res, { own: true });
+    assert.equal(sent.filter((s) => s.content.text).length, 0, 'no second answer is produced');
+});
+
 test('router: an unknown "!command" is ignored, not an error', async () => {
     const { router, sent } = world();
     const res = await router.processMessage(msg({ message: { conversation: '!wibble' } }));

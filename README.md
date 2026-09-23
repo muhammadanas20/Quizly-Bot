@@ -77,6 +77,17 @@ sticker arrives
 | `!stats` | anyone | deletions, AI usage, memory, uptime |
 | `!ping` | anyone | latency + memory |
 
+Every owner command answers with a **reaction on your command message** — 🚩 when
+someone is flagged, ✅ when the flag is lifted, ℹ️ when there was nothing to remove,
+⛔ when you are not the owner — followed by a one-line reply naming the member. You
+never have to wonder whether the command landed.
+
+You can type them from **your own number or from the bot's account** — the phone the
+bot runs on is the natural place to type `!flag`, and commands sent by the bot's own
+account are treated as owner commands (that account only exists on hardware you
+control). The quiz solver still ignores the bot's own messages, otherwise its own
+answer — which quotes the quiz image — would be solved again forever.
+
 Flagged members can also be seeded from code in `.env`:
 
 ```env
@@ -187,10 +198,12 @@ Check it yourself on the VM: `pm2 monit` or `free -h`.
 | 7 | Nothing persisted; a restart lost all state | Flag list on disk, session on disk, PM2 auto-restart |
 | 8 | Replies were one blob of `REASONING:` then `ANSWERS:` | Per-question *question → reason → answer*, chunked on question boundaries |
 | 9 | When the model's JSON did not parse, the raw JSON was posted into the group (`{"questions":[{"n":1,…`) — and it happened whenever the answer was cut off by the token limit, which is most long quizzes | Four-pass parser (strict JSON → repaired document → key/value pairs → numbered prose), a token ceiling that actually fits a long quiz, and a warning instead of a silent short answer |
+| 10 | `!flag` / `!unflag` typed from the bot's own account were silently dropped — the router returned `own` before the command handler ran, so the command did nothing at all and gave no feedback | Own-account commands are processed as owner commands, and every owner command answers with a reaction on the command message (🚩 / ✅ / ℹ️ / ⛔) |
+| 11 | A flag set from an `@mention` was stored under the LID only, while the same person's messages arrive by phone number — so the guard could miss them and `!unflag` by number reported "not flagged" | Every target is stored under **all** of its identities (phone number + LID), the guard aliases any new identity it sees onto the entry, and the label uses the member's name instead of a raw LID |
 
 > **What I could not verify here.** This sandbox has no outbound internet, no WhatsApp
 > number and no API keys, so I could not complete a live login or a real Gemini/Grok call.
-> What *is* verified: 175 unit and integration tests over the guard, the router, the
+> What *is* verified: 183 unit and integration tests over the guard, the router, the
 > formatting, the provider request shapes and the fallback logic; a real process boot
 > (socket constructed, reconnect backoff, clean shutdown); and every request body asserted
 > against the documented API shapes. Two claims I made earlier about the old code were

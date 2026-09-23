@@ -205,6 +205,21 @@ test('guard: a flagged LID-only sender is still caught', async () => {
     assert.equal(sent.length, 1);
 });
 
+test('guard: learns the phone number of a LID-flagged member, so !unflag by number works', async () => {
+    const { guard, flags } = makeWorld({ flagged: false });
+    flags.add(new Set(['555@lid']), { label: 'Ali-by-lid' });
+
+    const msg = {
+        key    : { remoteJid: GROUP, participant: '923001234567@s.whatsapp.net', participantAlt: '555@lid', fromMe: false, id: 'MSG9' },
+        message: stickerMsg.message
+    };
+    assert.equal((await guard.handle(msg)).act, 'delete');
+
+    // the entry now answers to the phone number as well
+    assert.equal(flags.has(new Set(['923001234567'])), true, 'the new identity was aliased onto the entry');
+    assert.equal(flags.has(new Set(['555@lid'])), true, 'the original identity still resolves');
+});
+
 test('guard: tolerates a malformed message object', async () => {
     const { guard, sent } = makeWorld();
     assert.doesNotThrow(async () => { await guard.handle({}); await guard.handle(null); });

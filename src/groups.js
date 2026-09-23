@@ -36,13 +36,17 @@ export function createGroupCache({ sock, getMe, log, ttlMs = 10 * 60 * 1000 }) {
         try {
             const meta = await sock.groupMetadata(jid);
             const admins = new Set();
+            const names = new Map();
             let iAmAdmin = false;
             const me = myIds();
 
             for (const p of meta?.participants || []) {
+                const ids = normaliseParticipant(p);
+                const name = p?.notify || p?.verifiedName || p?.name || p?.pushName || '';
+                if (name) for (const id of ids) names.set(id, name);
+
                 const role = p?.admin || p?.adminPn;
                 if (role !== 'admin' && role !== 'superadmin') continue;
-                const ids = normaliseParticipant(p);
                 for (const id of ids) admins.add(id);
                 for (const id of ids) if (me.has(id)) iAmAdmin = true;
             }
@@ -54,7 +58,7 @@ export function createGroupCache({ sock, getMe, log, ttlMs = 10 * 60 * 1000 }) {
             }
             for (const id of me) if (admins.has(id)) iAmAdmin = true;
 
-            const entry = { at: Date.now(), admins, subject: meta?.subject || '', iAmAdmin };
+            const entry = { at: Date.now(), admins, names, subject: meta?.subject || '', iAmAdmin };
             cache.set(jid, entry);
             return entry;
         } catch (err) {
@@ -80,11 +84,23 @@ export function createGroupCache({ sock, getMe, log, ttlMs = 10 * 60 * 1000 }) {
         return cache.get(jid)?.subject || '';
     }
 
+    /**
+     * Display name for one participant, from the cached metadata. Used to label
+     * a flag with "Muhammad Anas" instead of the raw LID the mention carries.
+     * Returns '' when the cache is cold or the name is unknown.
+     */
+    async function nameOf(jid, id) {
+        const key = normalizeId(id);
+        if (!key) return '';
+        const entry = await get(jid);
+        return entry?.names?.get(key) || '';
+    }
+
     function invalidate(jid) {
         cache.delete(jid);
     }
 
-    return { get, refresh, isAdmin, subjectOf, invalidate, get size() { return cache.size; } };
+    return { get, refresh, isAdmin, subjectOf, nameOf, invalidate, get size() { return cache.size; } };
 }
 
 export default createGroupCache;

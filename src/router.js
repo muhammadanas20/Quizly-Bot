@@ -13,7 +13,7 @@
 
 import { collectSenderIds } from './guard.js';
 import { parseCommand } from './commands.js';
-import { extractText, senderOf, bareJid, isGroupJid } from './message.js';
+import { extractText, senderOf, bareJid, isGroupJid, identitiesOf } from './message.js';
 
 /** Chats the bot should never respond in. */
 const IGNORED_SUFFIXES = ['@broadcast', '@newsletter'];
@@ -31,6 +31,7 @@ export function createRouter({ sock, config, log, flags, guard, groups, quiz, co
         if (shouldIgnore(jid)) return { ignored: true };
 
         const isGroup = isGroupJid(jid);
+        const fromMe  = Boolean(msg?.key?.fromMe);
 
         // 1. guard — silent, instant, and the cheapest possible check first
         try {
@@ -39,11 +40,15 @@ export function createRouter({ sock, config, log, flags, guard, groups, quiz, co
             log.warn(`guard error: ${err.message}`);
         }
 
-        if (msg.key.fromMe) return { own: true };
-
         const text = extractText(msg.message);
         const senderIds = collectSenderIds(msg, sock);
-        const isOwner = [...senderIds].some((id) => config.owners.includes(id));
+
+        // A command typed from the bot's own account is an owner command: that
+        // account only lives on hardware the operator controls, and driving the
+        // bot from the phone it runs on is the natural thing to do. Without
+        // this, `!flag` typed on the bot's own phone is silently dropped — the
+        // bot appears to ignore the command entirely.
+        const isOwner = fromMe || [...senderIds].some((id) => config.owners.includes(id));
 
         const ctx = {
             sock,
@@ -56,7 +61,11 @@ export function createRouter({ sock, config, log, flags, guard, groups, quiz, co
             senderLabel      : bareJid(senderOf(msg)),
             chatName         : groups.subjectOf(jid) || (isGroup ? jid : 'private'),
             mentioned        : msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [],
-            quotedParticipant: msg.message?.extendedTextMessage?.contextInfo?.participant
+            quotedParticipant: msg.message?.extendedTextMessage?.contextInfo?.participant,
+            groups,
+            // one JID → every identity that same human can be known by, so
+            // !flag and !unflag always agree on who they are talking about
+            expandIds        : (raw) => identitiesOf(raw, sock)
         };
 
         // 2. commands
@@ -65,7 +74,17 @@ export function createRouter({ sock, config, log, flags, guard, groups, quiz, co
             if (!parsed) return { unknownCommand: true };
             try {
                 const out = await commands.handle(ctx);
-                if (out.handled && out.reply) await sock.sendMessage(jid, { text: out.reply });
+                // The reaction is the confirmation: it lands on the command
+                // message itself, so the group sees "done" without the bot
+                // having to say anything.
+                if (out?.react) {
+                    try {
+                        await sock.sendMessage(jid, { react: { text: out.react, key: msg.key } });
+                    } catch (err) {
+                        log.debug(`react failed: ${err.message}`);
+                    }
+                }
+                if (out?.handled && out?.reply) await sock.sendMessage(jid, { text: out.reply });
                 return { command: parsed.name };
             } catch (err) {
                 log.error(`command "${parsed.name}" failed: ${err.message}`);
@@ -76,7 +95,9 @@ export function createRouter({ sock, config, log, flags, guard, groups, quiz, co
             }
         }
 
-        // 3. quiz
+        // 3. quiz — never on our own messages. The bot's answer quotes the quiz
+        // image, so re-processing it would solve the same quiz forever.
+        if (fromMe) return { own: true };
         if (!quiz.trigger(msg, isGroup)) return { nothing: true };
 
         log.info(`quiz triggered in "${ctx.chatName}" by ${ctx.senderLabel}`);

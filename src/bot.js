@@ -56,6 +56,16 @@ export async function startBot({
     let reconnectTimer = null;
     let reconnectScheduled = false;
 
+    // One wrapper shared by the guard, the quiz handler and the router. The
+    // getters matter: `sock` is replaced on every reconnect, so a reference
+    // captured once would point at a dead socket — and would silently lose the
+    // lid-mapping store the guard needs to turn a LID into a phone number.
+    const sockApi = {
+        sendMessage        : (jid, content) => sock.sendMessage(jid, content),
+        get signalRepository() { return sock?.signalRepository; },
+        get user() { return sock?.user; }
+    };
+
     const groups = createGroupCache({
         sock  : { groupMetadata: (jid) => sock.groupMetadata(jid) },
         getMe : () => sock?.user?.id,
@@ -63,7 +73,7 @@ export async function startBot({
     });
 
     const guard = createGuard({
-        sock   : { sendMessage: (jid, content) => sock.sendMessage(jid, content) },
+        sock   : sockApi,
         flags,
         config,
         log,
@@ -71,7 +81,7 @@ export async function startBot({
     });
 
     const quiz = createQuizHandler({
-        sock  : { sendMessage: (jid, content) => sock.sendMessage(jid, content) },
+        sock  : sockApi,
         config,
         log,
         limiter,
@@ -87,7 +97,7 @@ export async function startBot({
 
     // ── per-message routing ──────────────────────────────────────────────────
     const router = createRouter({
-        sock  : { sendMessage: (jid, content) => sock.sendMessage(jid, content) },
+        sock  : sockApi,
         config,
         log,
         flags,
