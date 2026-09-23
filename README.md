@@ -129,10 +129,14 @@ protocol with no browser at all.
 
 | | whatsapp-web.js (before) | Baileys (now) |
 |---|---|---|
-| Chromium process | yes, ~600–900 MB | **none** |
-| `npm install` download | Chrome (~150 MB) | none |
-| Cold start | ~20 s | ~1 s |
-| Measured RSS after `require()` | — | **105 MB** |
+| Chromium process | yes — typically several hundred MB | **none** |
+| `npm install` download | Chrome, via `postinstall` | none |
+| Measured RSS after `require()` | not measured | **104 MB** *(measured here: 103.8 MB RSS)* |
+| Native/browser deps to keep alive | Chromium + Puppeteer | none |
+
+> The "before" column is architectural, not benchmarked — I did not run the old version
+> here. The 104 MB figure is measured: `node -e "require('@whiskeysockets/baileys')"`.
+> Expect a connected session to sit somewhat higher; check with `pm2 monit` on the VM.
 
 Additional memory work:
 
@@ -152,14 +156,23 @@ Check it yourself on the VM: `pm2 monit` or `free -h`.
 
 | # | Problem in the old code | Fix |
 |---|---|---|
-| 1 | **`client.on('message_create')` only fires for messages the bot itself sent.** In whatsapp-web.js that event means *outgoing*; incoming messages use `message`. The bot was listening on the wrong event. | Baileys `messages.upsert` with a `type === 'notify'` filter |
-| 2 | `msg.body.toLowerCase()` throws on media-only messages (stickers have no `body`) — swallowed by the catch-all, so it failed silently | `(msg.body \|\| '')` plus a dedicated classifier |
-| 3 | Chromium on a 1 GiB VM → OOM kills, plus a 150 MB Chrome download in `postinstall` | No Chromium at all |
-| 4 | `process.exit(1)` at import time if `GROQ_API_KEY` was missing | Startup validation that reports the problem and lists the fix |
-| 5 | One provider, one model, no fallback | Three providers, per-provider model fallbacks, error classification |
-| 6 | Rate limiter was hard-wired to Groq's limits | Configurable, provider-independent |
-| 7 | Nothing persisted; restart lost everything | Flag list on disk, session on disk, PM2 auto-restart |
-| 8 | Replies were one blob of "REASONING" then "ANSWERS" | Per-question *question → reason → answer*, chunked on question boundaries |
+| 1 | It listened on `message_create`, which whatsapp-web.js emits for **every** message *including the bot's own outgoing ones* — the `if (msg.id.fromMe) return` guard sits *after* that emit (`src/Client.js:652`). So the handler re-inspected everything the bot sent. Not fatal (the trigger needed an image), but it is the wrong event and one image-forward away from a loop. | Baileys `messages.upsert`, filtered to `type === 'notify'` and `!key.fromMe` |
+| 2 | `executablePath: '/usr/bin/chromium-browser'` — on Ubuntu 24.04 that path is a **snap** stub, which fails on a headless VM without snapd. | No Chromium at all |
+| 3 | Puppeteer + a headless browser on 1 GiB of RAM, plus a Chrome download in `postinstall` | Baileys: 104 MB RSS measured on load, nothing to download |
+| 4 | `process.exit(1)` at import time if `GROQ_API_KEY` was missing — the process died before printing anything useful | Startup validation that names the missing key and the fix |
+| 5 | One provider, one model, no fallback — a retired model id breaks every quiz | Three providers, per-provider model fallbacks, error classification |
+| 6 | Rate limiter was hard-wired to Groq's free-tier numbers | Configurable, provider-independent |
+| 7 | Nothing persisted; a restart lost all state | Flag list on disk, session on disk, PM2 auto-restart |
+| 8 | Replies were one blob of `REASONING:` then `ANSWERS:` | Per-question *question → reason → answer*, chunked on question boundaries |
+
+> **What I could not verify here.** This sandbox has no outbound internet, no WhatsApp
+> number and no API keys, so I could not complete a live login or a real Gemini/Grok call.
+> What *is* verified: 157 unit and integration tests over the guard, the router, the
+> formatting, the provider request shapes and the fallback logic; a real process boot
+> (socket constructed, reconnect backoff, clean shutdown); and every request body asserted
+> against the documented API shapes. Two claims I made earlier about the old code were
+> wrong and are corrected above — `message_create` is not outgoing-only, and `msg.body` is
+> always a string in whatsapp-web.js (`src/structures/Message.js:55`), so it never threw.
 
 ---
 
