@@ -54,14 +54,22 @@ export async function callOpenAICompat({
         });
     }
 
-    const text = res.json?.choices?.[0]?.message?.content?.trim();
+    const choice = res.json?.choices?.[0];
+    const text = choice?.message?.content?.trim();
     if (!text) {
-        throw new AiError(`empty response (finish_reason=${res.json?.choices?.[0]?.finish_reason || 'none'})`, {
+        throw new AiError(`empty response (finish_reason=${choice?.finish_reason || 'none'})`, {
             status: 200, provider: name, model, kind: 'unknown', retryable: true
         });
     }
 
-    return { provider: name, model, text, usage: res.json?.usage || null };
+    // 'length' = the answer was cut off by max_tokens, so the JSON is probably
+    // incomplete. Salvage what is there and warn about the rest.
+    return {
+        provider: name, model, text,
+        finishReason: choice?.finish_reason || '',
+        truncated: choice?.finish_reason === 'length',
+        usage: res.json?.usage || null
+    };
 }
 
 export default callOpenAICompat;

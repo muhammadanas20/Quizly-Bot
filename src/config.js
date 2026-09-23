@@ -78,10 +78,15 @@ export function loadConfig(env = process.env) {
         owners          : list(env.OWNER_NUMBERS).map(normalizeId).filter(Boolean),
         phoneNumber     : normalizeId(env.PHONE_NUMBER),
 
-        // AI
-        aiOrder         : list(env.AI_ORDER || 'gemini,grok,groq'),
+        // AI — Groq first: it answers a quiz image in about a second, so the
+        // group sees the answer while Gemini/Grok are still warming up.
+        aiOrder         : list(env.AI_ORDER || 'groq,gemini,grok'),
         aiTimeoutMs     : int(env.AI_TIMEOUT_MS, 60000) || 60000,
-        aiMaxTokens     : int(env.AI_MAX_TOKENS, 1200) || 1200,
+        // 1200 tokens runs out halfway through a 20-question quiz, which cuts
+        // the JSON in half. The parser salvages what it can, but there is no
+        // reason to make it: 2400 covers ~35 questions and costs nothing when
+        // the answer is short (max_tokens is a ceiling, not a target).
+        aiMaxTokens     : int(env.AI_MAX_TOKENS, 2400) || 2400,
 
         gemini: {
             key            : String(env.GEMINI_API_KEY || '').trim(),

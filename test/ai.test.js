@@ -144,6 +144,29 @@ test('empty completion is an error, not a silent success', async () => {
     );
 });
 
+test('gemini: MAX_TOKENS is reported so the caller can warn about missing questions', async () => {
+    const f = mockFetch([{ status: 200, json: { candidates: [{ content: { parts: [{ text: '{"questions":[' }] }, finishReason: 'MAX_TOKENS' }] } }]);
+    const out = await callGemini({ apiKey: 'K', model: 'm', image: IMAGE, prompt: 'P', timeoutMs: 500, maxTokens: 10, fetchImpl: f });
+    assert.equal(out.truncated, true);
+    assert.equal(out.finishReason, 'MAX_TOKENS');
+});
+
+test('gemini: a normal finish is not flagged as truncated', async () => {
+    const f = mockFetch([{ status: 200, json: { candidates: [{ content: { parts: [{ text: '{}' }] }, finishReason: 'STOP' }] } }]);
+    const out = await callGemini({ apiKey: 'K', model: 'm', image: IMAGE, prompt: 'P', timeoutMs: 500, maxTokens: 10, fetchImpl: f });
+    assert.equal(out.truncated, false);
+});
+
+test('openaiCompat: finish_reason length is reported as truncated', async () => {
+    const f = mockFetch([{ status: 200, json: { choices: [{ message: { content: '{"questions":[' }, finish_reason: 'length' }] } }]);
+    const out = await callOpenAICompat({ name: 'groq', apiKey: 'K', model: 'm', image: IMAGE, prompt: 'P', timeoutMs: 500, maxTokens: 10, fetchImpl: f });
+    assert.equal(out.truncated, true);
+
+    const ok = mockFetch([{ status: 200, json: { choices: [{ message: { content: '{}' }, finish_reason: 'stop' }] } }]);
+    const done = await callOpenAICompat({ name: 'groq', apiKey: 'K', model: 'm', image: IMAGE, prompt: 'P', timeoutMs: 500, maxTokens: 10, fetchImpl: ok });
+    assert.equal(done.truncated, false);
+});
+
 // ── provider chain ───────────────────────────────────────────────────────────
 test('solveQuiz: falls through to the next provider when the first is rate limited', async () => {
     const f = mockFetch([

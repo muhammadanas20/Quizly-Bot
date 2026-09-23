@@ -36,7 +36,7 @@ test('loadConfig: defaults are sane with an empty environment', () => {
     assert.deepEqual(cfg.guardMedia, ['sticker']);
     assert.equal(cfg.guardEnabled, true);
     assert.equal(cfg.ackMode, 'react');
-    assert.deepEqual(cfg.aiOrder, ['gemini', 'grok', 'groq']);
+    assert.deepEqual(cfg.aiOrder, ['groq', 'gemini', 'grok']);
     assert.equal(cfg.gemini.model, 'gemini-2.5-flash');
     assert.equal(cfg.gemini.thinkingBudget, 0);
     assert.equal(cfg.grok.model, 'grok-4.5');

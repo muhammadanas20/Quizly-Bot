@@ -203,6 +203,44 @@ test('solve: every provider failing produces an actionable message', async () =>
     assert.deepEqual(sent.filter((s) => s.content.react).map((s) => s.content.react.text), ['👀', '❌']);
 });
 
+test('solve: an answer cut off by the token limit is still formatted, with a warning', async () => {
+    // the real shape of a MAX_TOKENS answer: valid start, half-written last question
+    const cutOff = `{
+  "questions": [
+    {"n": 1, "question": "Capital of Pakistan?", "reason": "Islamabad since the 1960s.", "answer": "B — Islamabad"},
+    {"n": 2, "question": "Largest ocean?", "reason": "The Pacific is the biggest.", "answer": "C — Pacific"},
+    {"n": 3, "question": "Largest dese`;
+    const fetchImpl = async () => ({
+        status: 200,
+        text  : async () => JSON.stringify({
+            candidates: [{ content: { parts: [{ text: cutOff }] }, finishReason: 'MAX_TOKENS' }]
+        })
+    });
+
+    const { quiz, sent } = world({ fetchImpl });
+    const res = await quiz.solve(imageMsg(), { isGroup: true, chatName: 'Test Group' });
+
+    assert.equal(res.ok, true);
+    assert.equal(res.questions, 2, 'the two complete questions survive');
+
+    const body = sent.find((s) => s.content.text?.includes('Quiz solved')).content.text;
+    assert.match(body, /\*Q1\.\* Capital of Pakistan\?/);
+    assert.match(body, /✅ \*C — Pacific\*/);
+    assert.match(body, /output limit/, 'the user is told the answer was cut short');
+    assert.ok(!body.includes('{'), 'no raw JSON is dumped into the group');
+});
+
+test('solve: a model that finds no question gets a readable reply, not raw JSON', async () => {
+    const { quiz, sent } = world({ fetchImpl: okFetch('{"questions":[],"unreadable":["no question found in image"]}') });
+    const res = await quiz.solve(imageMsg(), { isGroup: true, chatName: 'Test Group' });
+
+    assert.equal(res.ok, false);
+    const body = sent.find((s) => s.content.text).content.text;
+    assert.match(body, /Could not read any question/);
+    assert.ok(!body.includes('{'), 'the empty JSON must not be posted to the group');
+    assert.deepEqual(sent.filter((s) => s.content.react).map((s) => s.content.react.text), ['👀', '❌']);
+});
+
 test('solve: an answer that is not JSON is still delivered verbatim', async () => {
     const { quiz, sent } = world({ fetchImpl: okFetch('The capital of Pakistan is Islamabad.') });
     const res = await quiz.solve(imageMsg(), { isGroup: true });
