@@ -31,7 +31,11 @@ import { createRouter } from './router.js';
 const RECONNECT_BASE_MS = 3000;
 const RECONNECT_MAX_MS = 60000;
 
-export async function startBot({ config, log, fetchImpl }) {
+export async function startBot({
+    config, log, fetchImpl,
+    socketFactory = makeWASocket,
+    authStateFactory = useMultiFileAuthState
+}) {
     config.fetchImpl = fetchImpl;      // lets tests inject a fake network
     const startedAt = Date.now();
 
@@ -97,9 +101,9 @@ export async function startBot({ config, log, fetchImpl }) {
     async function connect() {
         if (stopped) return;
 
-        const { state, saveCreds } = await useMultiFileAuthState(config.sessionDir);
+        const { state, saveCreds } = await authStateFactory(config.sessionDir);
 
-        sock = makeWASocket({
+        sock = socketFactory({
             auth                        : state,
             logger                      : log,
             printQRInTerminal           : false,
@@ -164,7 +168,7 @@ export async function startBot({ config, log, fetchImpl }) {
                 // pairing code is accepted. This is a restart signal, not a
                 // failed pairing; reconnect immediately using the saved creds.
                 if (reconnectScheduled || stopped) return;
-                const pairingRestart = status === 515;
+                const pairingRestart = status === DisconnectReason.restartRequired;
                 const wait = pairingRestart
                     ? 0
                     : Math.min(RECONNECT_BASE_MS * 2 ** attempts, RECONNECT_MAX_MS);
@@ -180,7 +184,10 @@ export async function startBot({ config, log, fetchImpl }) {
                     reconnectTimer = null;
                     connect().catch((err) => log.error(`reconnect failed: ${err.message}`));
                 }, wait);
-                reconnectTimer.unref?.();
+                // This is essential work, not background housekeeping. Once
+                // the old socket closes, this timer may be the only handle
+                // keeping Node alive until the replacement socket is created.
+                // Do not unref it, even for the zero-delay pairing restart.
             }
         });
 

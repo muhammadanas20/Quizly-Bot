@@ -98,6 +98,18 @@ npm start                 # prints a QR code — scan it
 Full walkthrough for the Azure VM, from your laptop, is in
 **[docs/SETUP-FROM-YOUR-LAPTOP.md](docs/SETUP-FROM-YOUR-LAPTOP.md)**.
 
+### Pairing succeeds, then the bot returns to the shell
+
+A `515` / `restart required` immediately after `pairing configured successfully`
+means WhatsApp accepted pairing and expects a replacement connection. It is not,
+by itself, a reason to delete `auth/` or scan again.
+
+Older code called `reconnectTimer.unref()`, allowing Node to exit when the old
+socket closed, before reconnecting. The reconnect timer now keeps Node alive;
+shutdown still cancels it. After installing the fix, run `npm start` again with
+the existing session directory and look for `Quizly Bot is ONLINE`. If PM2 is
+already running the bot, use `pm2 restart quizly` instead of starting a second copy.
+
 ---
 
 ## AI providers
