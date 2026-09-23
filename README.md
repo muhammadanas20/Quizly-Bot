@@ -121,6 +121,35 @@ shutdown still cancels it. After installing the fix, run `npm start` again with
 the existing session directory and look for `Quizly Bot is ONLINE`. If PM2 is
 already running the bot, use `pm2 restart quizly` instead of starting a second copy.
 
+### `connection closed (status=440)` — “conflict: replaced”, again and again
+
+`conflict: replaced` is WhatsApp telling you that **another connection opened
+with this same session**. The classic setup: the bot runs under PM2 *and*
+somebody also starts a copy by hand (`npm start`). The second copy logs in, the
+first gets “replaced” and reconnects 3 seconds later — which replaces the
+second, which reconnects… and the two copies trade places forever. The bot
+never stays online no matter how often you `pm2 restart quizly`.
+
+The bot now guards against this twice:
+
+* **A single-instance lock** (`data/instance.lock`). A second copy that shares
+  the data/session directory refuses to connect while the first is alive, says
+  exactly that in the log (with the holder's pid), and takes over automatically
+  once the other copy exits.
+* **Stand-down on replace.** If a duplicate connection *does* steal the session
+  anyway (e.g. an older copy without the lock is still running), the bot waits
+  a full minute before retrying instead of re-igniting the kick-war.
+
+When you see the conflict message, find and stop the duplicate:
+
+```bash
+pm2 ls                       # is quizly running here?
+ps aux | grep "node index"   # and also started by hand in some terminal?
+```
+
+Keep exactly one copy. If you are certain none is running and the bot still
+waits on `data/instance.lock`, delete that file and restart.
+
 ---
 
 ## AI providers
