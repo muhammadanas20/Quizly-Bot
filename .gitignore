@@ -1,4 +1,23 @@
+# secrets
 .env
-.wwebjs_auth
-.wwebjs_cache
-node_modules
+.env.*
+!.env.example
+
+# WhatsApp session (contains your account's long-lived keys — NEVER commit)
+auth/
+.wwebjs_auth/
+.wwebjs_cache/
+
+# runtime state (flags, counters, QR image)
+data/
+
+# deps + logs
+node_modules/
+*.log
+npm-debug.log*
+pm2-*.log
+
+# editor / os
+.DS_Store
+.vscode/
+.idea/
