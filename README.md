@@ -1,12 +1,14 @@
 # Quizly Bot
 
-A WhatsApp bot that does two jobs, built to run on a **1 GiB RAM** VM:
+A WhatsApp bot that does three jobs, built to run on a **1 GiB RAM** VM:
 
 1. **Quiz solver** — send `quiz` + a screenshot, get every question answered in order:
    *question → one-line reason → answer*, then a compact answer key.
 2. **Silent media guard** — a member you flag has their stickers and photos removed
    the instant they post them, including view-once photos, in any group where the bot is
    admin. **The bot never warns or sends replacement media.** The flagged media just disappears.
+3. **Group games** — eight random-number games the whole group plays together
+   (`!game`), with a per-group scoreboard every member contributes to (`!top`).
 
 ---
 
@@ -68,11 +70,90 @@ sticker or photo arrives (view-once photos are unwrapped as images)
   Set `GUARD_MEDIA=all` to remove every supported media type; if your existing `.env`
   still says `GUARD_MEDIA=sticker`, change it to `sticker,image` to enable photo removal.
 
+---
+
+## Games the whole group plays
+
+Eight games, all driven by random numbers, one round per chat at a time — and a
+scoreboard every member contributes to:
+
+| Game | Start it with | How you win | Points |
+|---|---|---|---|
+| 🔢 `number` | `!game number [1-100]` | send numbers; too high / too low, hot-and-cold, and a narrowing hint after four misses | 10 − 1 per wrong guess |
+| 🎲 `dice` | `!game dice` | guess the face of one die, 1-6 | 6 |
+| 🪙 `coin` | `!game coin` | call heads or tails on a coin that is already in the air | 2 |
+| 🎰 `slots` | `!game slots` | pick a lucky digit 1-9; three random reels pay a pair or three of a kind | 3 / 15 |
+| ➗ `math` | `!game math [hard]` | first correct answer to a random sum | 5 easy / 8 hard |
+| 🔤 `scramble` | `!game scramble` | first correct answer to a scrambled word | 5 |
+| 🧠 `trivia` | `!game trivia` | first correct answer — built-in questions plus the members' own | 5 |
+| 🎁 `lucky` | `!game lucky` → `!in` → `!game draw` | a random entrant is drawn | 8 |
+
+**Everyone can play and everyone scores**
+
+* Your first attempt in a round earns a participation point, so a member who never
+  wins is still on the board and still contributing.
+* A win pays the game's points plus a streak bonus (up to +5 for consecutive wins),
+  and contributing a trivia question is worth +2 (the first ten per member).
+* `!game me` shows your points, wins, rounds played, best streak and rank;
+  `!top` is this chat's leaderboard and `!top all` merges every chat the bot has seen.
+* Scores are **per group** and survive restarts in `data/scores.json` next to the flags.
+
+**Answers are just messages.** While a round is running you can send `57`, `heads` or
+the trivia answer with no prefix at all. `!guess <answer>` always works, and `!g` is a
+shorter spelling. A wrong guess is a single ❌ reaction — the number game answers with
+a direction and how warm you are, and nothing else spams the chat.
+
+**Rounds end themselves.** Every round reveals the answer when it times out
+(`GAME_TIMEOUT`, 180 s by default, announced by the bot even if nobody is typing), or
+when the starter or the bot owner sends `!game stop`. A second round in the same chat
+waits for the first; the member who started it (or the owner) can replace it.
+
+**Members add to the game, not just play it.** `!game addq Question ; Answer` puts your
+own question into the trivia pool (`/` separates accepted spellings) — it is drawn
+alongside the built-in questions from then on, and the first ten questions a member
+contributes are worth +2 points each:
+
+```
+!game addq Which city is the capital of Japan? ; Tokyo
+!game trivia
+```
+
+### Instant randomness (no round, no scoreboard)
+
+| Command | What it does |
+|---|---|
+| `!random` · `!random 20` · `!random 1-1000` | a random number |
+| `!random pizza, burger, biryani` | picks one of the options at random |
+| `!roll` · `!roll 2d6` · `!roll d20` | dice |
+| `!flip` | heads or tails |
+| `!pick a, b, c` · `!shuffle a, b, c` | choose one / a random order |
+| `!8ball will I pass?` | the classic answers |
+
+### Game settings in `.env`
+
+```env
+GAMES=on            # off = the bot only does quiz + guard
+GAME_TIMEOUT=180    # seconds a round stays open before the reveal
+GAME_COOLDOWN=15    # breather between rounds (also the participation-point window)
+GAME_MAX_ATTEMPTS=12
+```
+
+---
+
 ## Commands
 
 | Command | Who | What |
 |---|---|---|
 | `!quiz` | anyone | solve the attached / replied image right now |
+| `!game` | anyone | every game, plus the score and random commands |
+| `!game <name> [args]` | anyone | start a round: number, dice, coin, slots, math, scramble, trivia, lucky |
+| `!guess <answer>` (`!g`) | anyone | take a shot in the running round |
+| `!in` | anyone | join a lucky draw |
+| `!top` (`!top all`) | anyone | leaderboard of this chat (or of every chat) |
+| `!game me` | anyone | your own score card |
+| `!game stop` | round starter / owner | end the round early |
+| `!game addq Q ; A` | anyone | add your own trivia question to the pool |
+| `!random` `!roll` `!flip` `!pick` `!shuffle` `!8ball` | anyone | instant randomness, no round needed |
 | `!flag <@person or number> [reason]` | owner | flag a member; stickers and photos (including view-once) are removed by default |
 | `!unflag <@person or number>` | owner | remove a flag |
 | `!flags` | owner | list flagged members + how much was removed |
@@ -84,6 +165,9 @@ Every owner command answers with a **reaction on your command message** — 🚩
 someone is flagged, ✅ when the flag is lifted, ℹ️ when there was nothing to remove,
 ⛔ when you are not the owner — followed by a one-line reply naming the member. You
 never have to wonder whether the command landed.
+
+The games work the same way: 🎉 on a winning guess, ❌ on a wrong one, 🎲/🎰/🎁 on a
+fresh round. A 👀 on your quiz screenshot means the solver picked it up.
 
 You can type them from **your own number or from the bot's account** — the phone the
 bot runs on is the natural place to type `!flag`, and commands sent by the bot's own
@@ -212,6 +296,9 @@ Additional memory work:
 * `scripts/setup-vm.sh` creates a **2 GiB swap file** and sets `vm.swappiness=10`.
 * One solve per chat at a time; duplicate triggers are dropped, not queued.
 * Group admin status is cached for 10 minutes so the guard never adds a round trip.
+* Game rounds live in memory only — a round is short-lived, so only the scoreboard
+  (`data/scores.json`, debounced writes) touches the disk. One `Map` lookup decides
+  whether an ordinary message is a guess, so games cost the guard path nothing.
 
 Check it yourself on the VM: `pm2 monit` or `free -h`.
 
@@ -252,26 +339,29 @@ src/
   config.js               env parsing + identity normalisation (PN / LID aware)
   log.js                  tiny pino-compatible logger
   bot.js                  Baileys socket, connection, reconnect
-  router.js               guard → commands → quiz, in that order
+  router.js               guard → commands → game guess → quiz, in that order
   guard.js                silent flagged-media removal (pure decision + live executor)
   flags.js                flagged-member store, persisted to data/flags.json
   groups.js               cached group metadata / "am I admin?"
   quiz.js                 trigger → download → AI → format → send
   format.js               JSON parsing + the per-question layout + chunking
-  commands.js             !flag / !unflag / !flags / !guard / !quiz / !stats
+  commands.js             !flag / !unflag / !flags / !guard / !quiz / !stats / !game / !guess / !top
+  games.js                the eight games + rounds, hints, scoring, leaderboards
+  scores.js               per-group scoreboard + contributed trivia, data/scores.json
+  random.js               !random / !roll / !flip / !pick / !shuffle / !8ball
   limiter.js              rate limiter + one-solve-per-chat gate
   message.js              pure WAMessage readers (kind, text, quoted, …)
   ai/                     gemini.js, openaiCompat.js (grok+groq), solve.js, http.js
 scripts/
   setup-vm.sh             one-shot VM bootstrap (Node, swap, PM2, deps)
   check-env.js            npm run check — validates keys and model names
-test/                     155 unit + integration tests (node --test, no deps)
+test/                     263 unit + integration tests (node --test, no deps)
 docs/
   SETUP-FROM-YOUR-LAPTOP.md
 ```
 
 ```bash
-npm test          # 155 tests
+npm test          # 263 tests
 npm run check     # validate your .env against the live APIs
 npm start         # run
 ```

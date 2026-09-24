@@ -43,6 +43,25 @@ test('loadConfig: defaults are sane with an empty environment', () => {
     assert.equal(cfg.ratePerMinute, 12);
 });
 
+test('loadConfig: the game settings have sane defaults and accept overrides', () => {
+    const cfg = loadConfig({});
+    assert.equal(cfg.gamesEnabled, true);
+    assert.equal(cfg.gameTimeoutMs, 180_000);
+    assert.equal(cfg.gameCooldownMs, 15_000);
+    assert.equal(cfg.gameMaxAttempts, 12);
+
+    const tuned = loadConfig({ GAMES: 'off', GAME_TIMEOUT: '60', GAME_COOLDOWN: '5', GAME_MAX_ATTEMPTS: '5' });
+    assert.equal(tuned.gamesEnabled, false);
+    assert.equal(tuned.gameTimeoutMs, 60_000);
+    assert.equal(tuned.gameCooldownMs, 5_000);
+    assert.equal(tuned.gameMaxAttempts, 5);
+
+    // nonsense falls back instead of producing a 0-second round or a 0-guess cap
+    const junk = loadConfig({ GAME_TIMEOUT: 'soon', GAME_MAX_ATTEMPTS: '-3' });
+    assert.equal(junk.gameTimeoutMs, 180_000);
+    assert.equal(junk.gameMaxAttempts, 12);
+});
+
 test('loadConfig: GROK_API_KEY is accepted as an alias for XAI_API_KEY', () => {
     const cfg = loadConfig({ GROK_API_KEY: 'xai-key-123' });
     assert.equal(cfg.grok.key, 'xai-key-123');

@@ -17,6 +17,9 @@ import { createGroupCache } from '../src/groups.js';
 import { createRateLimiter, createInflight } from '../src/limiter.js';
 import { createQuizHandler } from '../src/quiz.js';
 import { createCommandHandler } from '../src/commands.js';
+import { createScoreStore } from '../src/scores.js';
+import { createGameEngine } from '../src/games.js';
+import { createRandomTools } from '../src/random.js';
 import { loadConfig } from '../src/config.js';
 import log from '../src/log.js';
 
@@ -29,7 +32,7 @@ const ANSWER = JSON.stringify({
     questions: [{ n: 1, question: 'Capital of Pakistan?', reason: 'Islamabad replaced Karachi in the 1960s.', answer: 'B — Islamabad' }]
 });
 
-function world({ env = {}, botIsAdmin = true, fetchImpl } = {}) {
+function world({ env = {}, botIsAdmin = true, fetchImpl, random = () => 0.5 } = {}) {
     const sent = [];
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'router-'));
     const config = loadConfig({ OWNER_NUMBERS: OWNER, GEMINI_API_KEY: 'k', ...env });
@@ -64,19 +67,29 @@ function world({ env = {}, botIsAdmin = true, fetchImpl } = {}) {
         download: async () => Buffer.from([0xff, 0xd8, 0xff])
     });
 
+    // games: the same wiring bot.js uses, minus the auto-sweep timer
+    const scores = createScoreStore({ file: path.join(dir, 'scores.json') }).load();
+    const games = createGameEngine({
+        config, log, scores, groups, random, autoSweep: false,
+        send: async (jid, text) => { sent.push({ jid, content: { text } }); }
+    });
+
     const commands = createCommandHandler({
-        config, flags, log, guard, limiter, groups,
+        config, flags, log, guard, limiter, groups, games, scores,
+        randomTools: createRandomTools({ random }),
         startedAt: Date.now(),
         solveNow : (ctx) => quiz.solve(ctx.msg, { isGroup: ctx.isGroup, chatName: ctx.chatName })
     });
 
-    const router = createRouter({ sock, config, log, flags, guard, groups, quiz, commands });
+    const router = createRouter({ sock, config, log, flags, guard, groups, quiz, commands, games });
 
     const texts = () => sent.filter((s) => s.content.text).map((s) => s.content.text);
     const deletes = () => sent.filter((s) => s.content.delete);
     const reacts = () => sent.filter((s) => s.content.react).map((s) => s.content.react.text);
+    const lastText = () => texts().filter(Boolean).pop();
+    const lastReact = () => reacts().pop();
 
-    return { router, sent, texts, deletes, reacts, flags, config, sock };
+    return { router, sent, texts, lastText, lastReact, deletes, reacts, flags, scores, games, config, sock };
 }
 
 const msg = (over = {}) => ({
@@ -343,4 +356,142 @@ test('router: a failing AI is reported to the group', async () => {
     assert.equal(res.quiz.ok, false);
     assert.match(texts()[0], /API key rejected/);
     assert.deepEqual(reacts(), ['👀', '❌']);
+});
+
+// ── games ────────────────────────────────────────────────────────────────────
+// The whole point of routing games before the quiz solver: a bare "51" from a
+// member is a guess while a round is running, and the round is played through
+// the same deliver() path as the commands (reaction + one reply).
+const OTHER = '923001111111@s.whatsapp.net';
+
+test('router: !game starts a round and a bare number from another member wins it', async () => {
+    const { router, texts, reacts, scores, games } = world();      // RNG 0.5 → 51
+
+    await router.processMessage(msg({
+        key    : { remoteJid: GROUP, participant: OWNER + '@s.whatsapp.net', fromMe: false, id: 'G1' },
+        message: { conversation: '!game number 1-100' }
+    }));
+    assert.match(texts()[0], /Guess the number/);
+    assert.equal(games.active(GROUP).answer, 51);
+
+    // a plain "20" is a guess, not chat
+    const a = await router.processMessage(msg({ message: { conversation: '20' } }));
+    assert.deepEqual(a, { game: true });
+    assert.match(texts()[1], /Too low/);
+
+    // another member wins with a plain number too
+    const b = await router.processMessage(msg({
+        key    : { remoteJid: GROUP, participant: OTHER, fromMe: false, id: 'G2' },
+        message: { conversation: '51' }
+    }));
+    assert.deepEqual(b, { game: true });
+    assert.equal(reacts().pop(), '🎉');
+    assert.match(texts().pop(), /wins! the number was \*51\*/);
+    assert.equal(games.active(GROUP), null);
+    assert.equal(scores.board(GROUP).length, 2, 'both members are on the board');
+});
+
+test('router: a quiz screenshot still reaches the solver while a round is running', async () => {
+    const { router, texts, games } = world();
+
+    await router.processMessage(msg({ message: { conversation: '!game number 1-100' } }));
+    assert.ok(games.active(GROUP), 'the round is on');
+
+    const res = await router.processMessage(quizMsg());
+    assert.equal(res.quiz.ok, true, 'the quiz trigger wins over the game');
+    assert.ok(texts().some((t) => t.includes('Quiz solved')));
+    assert.ok(games.active(GROUP), 'and it does not end the round');
+});
+
+test('router: a plain message is ignored when no round is running', async () => {
+    const { router, sent } = world();
+    const res = await router.processMessage(msg({ message: { conversation: '51' } }));
+    assert.deepEqual(res, { nothing: true });
+    assert.equal(sent.length, 0);
+});
+
+test('router: the caption of a revoked photo can never win a round', async () => {
+    const { router, flags, sent, texts, games, scores } = world();
+    // the owner starts the round; TARGET (flagged) sends the answer as a caption
+    flags.add(new Set(['923009876543']), { label: 'Spammer' });
+    await router.processMessage(msg({
+        key    : { remoteJid: GROUP, participant: OWNER + '@s.whatsapp.net', fromMe: false, id: 'G0' },
+        message: { conversation: '!game number 1-100' }
+    }));
+    const before = texts().length;
+
+    const res = await router.processMessage(msg({
+        message: { imageMessage: { url: 'u', mimetype: 'image/jpeg', caption: '51' } }
+    }));
+
+    assert.deepEqual(res, { guarded: true });
+    assert.equal(sent.filter((s) => s.content.delete).length, 1, 'the photo is revoked');
+    assert.equal(texts().length, before, 'and its caption is not fed to the game');
+    assert.ok(games.active(GROUP), 'the round is still on');
+    assert.equal(scores.playerOf(GROUP, ['923009876543']), null, 'nothing was credited to them');
+});
+
+test('router: !guess, !top and the instant random commands are all reachable', async () => {
+    const { router, texts, lastText, lastReact } = world();
+
+    await router.processMessage(msg({ message: { conversation: '!game trivia' } }));
+    await router.processMessage(msg({ message: { conversation: '!guess London' } }));
+    assert.equal(lastReact(), '❌');
+    assert.match(lastText(), /London is not it/, 'an explicit wrong guess gets a one-liner');
+
+    await router.processMessage(msg({ message: { conversation: '!roll 2d6' } }));
+    assert.match(texts().pop(), /2d6 → 4 \+ 4 = \*8\*/);
+
+    await router.processMessage(msg({ message: { conversation: '!random 1-100' } }));
+    assert.match(texts().pop(), /\*51\*/);
+
+    await router.processMessage(msg({ message: { conversation: '!flip' } }));
+    assert.match(texts().pop(), /\*Tails\*/);
+
+    await router.processMessage(msg({ message: { conversation: '!game stop' } }));
+    const stopped = texts().pop();
+    assert.match(stopped, /Next round: `!game trivia`/, 'the starter can end their own round');
+
+    await router.processMessage(msg({ message: { conversation: '!top' } }));
+    assert.match(texts().pop(), /Top players — Study Group/);
+});
+
+test('router: a lucky draw is played with !game lucky, !in and !game draw', async () => {
+    const { router, texts, scores } = world();
+
+    await router.processMessage(msg({ message: { conversation: '!game lucky' } }));
+    assert.match(texts().pop(), /Ali is in|is in!/);
+
+    await router.processMessage(msg({
+        key    : { remoteJid: GROUP, participant: OTHER, fromMe: false, id: 'L2' },
+        message: { conversation: '!in' }
+    }));
+    assert.match(texts().pop(), /2 joined/);
+
+    await router.processMessage(msg({ message: { conversation: '!game draw' } }));
+    const drawn = texts().pop();
+    assert.match(drawn, /wins the lucky draw/);
+    assert.equal(scores.board(GROUP).length, 2, 'every entrant earned a point');
+    assert.equal(scores.boardAll()[0].points >= 8, true);
+});
+
+test('router: an unknown "!game chess" answers instead of going quiet', async () => {
+    const { router, texts, lastReact } = world();
+    const res = await router.processMessage(msg({ message: { conversation: '!game chess' } }));
+    assert.deepEqual(res, { command: 'game' });
+    assert.equal(lastReact(), '⚠️');
+    assert.match(texts().pop(), /do not know the game/);
+});
+
+test('router: a bot-authored game message is never treated as a guess', async () => {
+    const { router, sent, games } = world();
+    await router.processMessage(msg({ message: { conversation: '!game number 1-100' } }));
+
+    const res = await router.processMessage({
+        key    : { remoteJid: GROUP, participant: BOT, fromMe: true, id: 'B1' },
+        message: { conversation: '51' }
+    });
+    assert.deepEqual(res, { own: true });
+    assert.ok(games.active(GROUP), 'the round is untouched by the bot quoting a number');
+    assert.equal(sent.filter((s) => s.content.text).length, 1, 'only the round announcement');
 });

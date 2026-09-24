@@ -28,6 +28,9 @@ import { createQuizHandler } from './quiz.js';
 import { createCommandHandler } from './commands.js';
 import { createRouter } from './router.js';
 import { createInstanceLock } from './lock.js';
+import { createScoreStore } from './scores.js';
+import { createGameEngine } from './games.js';
+import { createRandomTools } from './random.js';
 
 const RECONNECT_BASE_MS = 3000;
 const RECONNECT_MAX_MS = 60000;
@@ -48,6 +51,7 @@ export async function startBot({
 
     // ── state ────────────────────────────────────────────────────────────────
     const flags = createFlagStore({ file: `${config.dataDir}/flags.json`, log }).load();
+    const scores = createScoreStore({ file: `${config.dataDir}/scores.json`, log }).load();
     for (const seed of config.seededFlags) {
         flags.add(seed.ids, { label: seed.label, reason: 'from .env FLAGGED_USERS', addedBy: 'env' });
     }
@@ -107,8 +111,23 @@ export async function startBot({
         download: (m) => downloadMediaMessage(m, 'buffer', {})
     });
 
+    // ── games ────────────────────────────────────────────────────────────────
+    // Rounds live in memory; only the scores are persisted. The engine announces
+    // a round that timed out through this socket wrapper, so a finished game
+    // still gets its reveal while nobody is typing.
+    const games = config.gamesEnabled
+        ? createGameEngine({
+            config,
+            log,
+            scores,
+            groups,
+            send: (jid, text) => sockApi.sendMessage(jid, { text })
+        })
+        : null;
+
     const commands = createCommandHandler({
-        config, flags, log, guard, limiter, groups, startedAt,
+        config, flags, log, guard, limiter, groups, games, scores, startedAt,
+        randomTools: createRandomTools(),
         solveNow: (ctx) => quiz.solve(ctx.msg, { isGroup: ctx.isGroup, chatName: ctx.chatName })
     });
 
@@ -121,7 +140,8 @@ export async function startBot({
         guard,
         groups,
         quiz,
-        commands
+        commands,
+        games
     });
 
     // ── connection ───────────────────────────────────────────────────────────
@@ -186,6 +206,7 @@ export async function startBot({
                 log.raw(`  🎯  trigger  : "${config.quizTrigger}" + image`);
                 log.raw(`  🚩  flagged  : ${flags.count} member(s)`);
                 log.raw(`  🛡️  guard    : ${config.guardEnabled ? `ON (${config.guardMedia.join(', ')})` : 'OFF'}`);
+                log.raw(`  🎮  games    : ${games ? `ON (${config.gameTimeoutMs / 1000}s rounds, ${scores.playerCount} players on the board)` : 'OFF'}`);
                 log.raw(`  🧠  ai       : ${config.aiOrder.filter((p) => config[p]?.key).join(' → ')}`);
                 log.raw(`  💾  memory   : ${mem} MB RSS`);
                 log.raw('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
@@ -264,6 +285,8 @@ export async function startBot({
         lock.cancel();          // abort a pending lock wait, if any
         log.warn(`shutting down (${reason})`);
         flags.flush();
+        scores.flush();
+        games?.close();
         try { await sock?.end?.(); } catch { /* ignore */ }
         lock.release();         // free the session for the next copy
         if (exit) setTimeout(() => process.exit(0), 300).unref?.();
@@ -291,6 +314,8 @@ export async function startBot({
     return {
         get socket() { return sock; },
         flags,
+        scores,
+        games,
         guard,
         groups,
         limiter,
