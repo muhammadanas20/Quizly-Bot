@@ -1,0 +1,1193 @@
+/**
+ * src/games.js — the in-group game engine.
+ *
+ *   !game                      list every game + the commands that go with it
+ *   !game <name> [args]        start a round in this chat
+ *   !guess <answer> / !g       take a shot (plain replies work too)
+ *   !in / !join                join the lucky draw
+ *   !game draw                 pick the lucky winner early
+ *   !game stop                 end the current round (starter or owner)
+ *   !game top [all]            leaderboard — this chat, or everywhere
+ *   !game me                   your own score card
+ *   !game addq Q ; A           contribute a trivia question to the pool
+ *
+ * Eight random games: number, dice, coin, slots, math, scramble, trivia, lucky.
+ * Everyone plays, everyone scores (every attempt earns a participation point),
+ * and the scoreboard is per group so a big group's leaderboard means something.
+ *
+ * A round lives in memory only: it is short-lived, and losing an in-flight round
+ * on restart costs nothing but a re-typed `!game`. Scores are what get persisted
+ * (src/scores.js).
+ *
+ * The game rules — matching an answer, hot/cold, the maths problem, the word
+ * scramble — are exported as pure functions so they can be tested without a
+ * socket, in keeping with the rest of this codebase.
+ */
+
+import { randomInt, pickOne, shuffle, slotReels, parseRange, parseCoinCall } from './random.js';
+
+// ─── Words for !game scramble ────────────────────────────────────────────────
+export const WORDS = Object.freeze([
+    'garden', 'planet', 'silver', 'bridge', 'orange', 'dinner', 'forest', 'market',
+    'window', 'yellow', 'puzzle', 'rocket', 'summer', 'winter', 'camera', 'doctor',
+    'engine', 'flower', 'guitar', 'hunter', 'island', 'jungle', 'kitten', 'ladder',
+    'monkey', 'nature', 'ocean', 'pencil', 'queen', 'rabbit', 'school', 'tiger',
+    'umbrella', 'village', 'wizard', 'zebra', 'bottle', 'castle', 'dragon', 'elephant',
+    'family', 'holiday', 'insect', 'jacket', 'kitchen', 'lemon', 'mirror', 'number'
+]);
+
+// ─── Built-in trivia pool (members can add more with !game addq) ─────────────
+export const TRIVIA = Object.freeze([
+    { q: 'What is the capital of Pakistan?', a: ['islamabad'] },
+    { q: 'How many days are there in a leap year?', a: ['366', 'three hundred and sixty six'] },
+    { q: 'Which planet is known as the Red Planet?', a: ['mars'] },
+    { q: 'What is the largest ocean on Earth?', a: ['pacific', 'the pacific', 'pacific ocean'] },
+    { q: 'What is the chemical symbol for gold?', a: ['au'] },
+    { q: 'How many continents are there?', a: ['7', 'seven'] },
+    { q: 'Which animal is the fastest on land?', a: ['cheetah', 'the cheetah'] },
+    { q: 'Which gas do plants absorb for photosynthesis?', a: ['carbon dioxide', 'co2'] },
+    { q: 'What is the largest mammal in the world?', a: ['blue whale', 'the blue whale'] },
+    { q: 'How many sides does a hexagon have?', a: ['6', 'six'] },
+    { q: 'Which country is the home of pizza?', a: ['italy'] },
+    { q: 'What is the currency of Japan?', a: ['yen', 'the yen', 'japanese yen'] },
+    { q: 'Which is the longest river in the world?', a: ['nile', 'the nile', 'river nile'] },
+    { q: 'How many players from one football team are on the pitch?', a: ['11', 'eleven'] },
+    { q: 'What is 7 × 8?', a: ['56', 'fifty six'] },
+    { q: 'Which month has 28 days (at least)?', a: ['february'] },
+    { q: 'At what temperature does water boil at sea level, in Celsius?', a: ['100', 'one hundred'] },
+    { q: 'Which animal is called the ship of the desert?', a: ['camel', 'the camel'] },
+    { q: 'How many minutes are there in an hour?', a: ['60', 'sixty'] },
+    { q: 'On which continent is the Sahara desert?', a: ['africa'] },
+    { q: 'Which is the largest country in the world by area?', a: ['russia'] },
+    { q: 'Which vitamin do you get from sunlight?', a: ['vitamin d', 'd', 'vit d'] },
+    { q: 'How many colours are there in a rainbow?', a: ['7', 'seven'] },
+    { q: 'What is the smallest prime number?', a: ['2', 'two'] },
+    { q: 'What is the capital of France?', a: ['paris'] },
+    { q: 'What do bees make?', a: ['honey'] },
+    { q: 'Which shape has exactly three sides?', a: ['triangle', 'a triangle'] },
+    { q: 'How many hours are there in two days?', a: ['48', 'forty eight'] },
+    { q: 'Which planet do we live on?', a: ['earth', 'the earth'] },
+    { q: 'At what temperature does water freeze, in Celsius?', a: ['0', 'zero'] },
+    { q: 'How many bones does an adult human body have?', a: ['206', 'two hundred and six'] },
+    { q: 'What is the tallest animal in the world?', a: ['giraffe', 'the giraffe'] },
+    { q: 'Which country has the most people?', a: ['india'] },
+    { q: 'What is the hardest natural substance?', a: ['diamond'] },
+    { q: 'How many strings does a standard guitar have?', a: ['6', 'six'] },
+    { q: 'Which sea creature has eight arms?', a: ['octopus', 'the octopus'] }
+]);
+
+/** Winner points per game. A round can be lost, never the scoreboard. */
+export const GAME_POINTS = Object.freeze({
+    number : 10,
+    dice   : 6,
+    coin   : 2,
+    slots  : 15,
+    math   : 5,
+    scramble: 5,
+    trivia : 5,
+    lucky  : 8
+});
+
+export const PARTICIPATION_POINTS = 1;
+/** Contributing a trivia question is worth points too — but only the first few. */
+export const CONTRIBUTION_POINTS = 2;
+export const CONTRIBUTION_LIMIT = 10;
+
+/**
+ * Every game the bot knows. `how` is what the player types; `blurb` is why they
+ * would. Kept as data so `!game` and the README can never drift apart.
+ */
+export const GAMES = Object.freeze([
+    {
+        name: 'number', aliases: ['number', 'num', 'guess', 'n'], emoji: '🔢', mode: 'race',
+        title: 'Guess the number', points: GAME_POINTS.number,
+        how: '!game number [1-100] → send a number',
+        blurb: 'A secret number, too-high/too-low hints, hot-and-cold feedback, 10 pts.'
+    },
+    {
+        name: 'dice', aliases: ['dice', 'die', 'roll'], emoji: '🎲', mode: 'race',
+        title: 'Dice', points: GAME_POINTS.dice,
+        how: '!game dice → guess 1-6',
+        blurb: 'One die is rolled; the first exact guess takes 6 pts.'
+    },
+    {
+        name: 'coin', aliases: ['coin', 'flip', 'toss', 'heads'], emoji: '🪙', mode: 'race',
+        title: 'Coin toss', points: GAME_POINTS.coin,
+        how: '!game coin → say heads or tails',
+        blurb: 'A pre-flipped coin. Call it right for 2 pts.'
+    },
+    {
+        name: 'slots', aliases: ['slots', 'slot', 'machine'], emoji: '🎰', mode: 'payout',
+        title: 'Slots', points: GAME_POINTS.slots,
+        how: '!game slots → !guess 7 (your lucky digit)',
+        blurb: 'Three reels, digits 1-9. Three of a kind pays 15, a pair pays 3.'
+    },
+    {
+        name: 'math', aliases: ['math', 'maths', 'sum', 'calc'], emoji: '➗', mode: 'race',
+        title: 'Maths', points: GAME_POINTS.math,
+        how: '!game math [hard] → send the answer',
+        blurb: 'A random sum, easy or hard. First correct answer takes 5-8 pts.'
+    },
+    {
+        name: 'scramble', aliases: ['scramble', 'word', 'unscramble', 'anagram'], emoji: '🔤', mode: 'race',
+        title: 'Word scramble', points: GAME_POINTS.scramble,
+        how: '!game scramble → send the word',
+        blurb: 'Letters shuffled at random; first correct word takes 5 pts.'
+    },
+    {
+        name: 'trivia', aliases: ['trivia', 'question', 'q', 'quiz'], emoji: '🧠', mode: 'race',
+        title: 'Trivia', points: GAME_POINTS.trivia,
+        how: '!game trivia → send the answer',
+        blurb: 'General knowledge, plus the questions members contributed. 5 pts.'
+    },
+    {
+        name: 'lucky', aliases: ['lucky', 'draw', 'raffle', 'lottery', 'giveaway'], emoji: '🎁', mode: 'lucky',
+        title: 'Lucky draw', points: GAME_POINTS.lucky,
+        how: '!game lucky → !in to join → !game draw',
+        blurb: 'Random winner among everyone who joins. Joining alone earns a point.'
+    }
+]);
+
+const BY_ALIAS = new Map(GAMES.flatMap((g) => g.aliases.map((a) => [a, g])));
+
+export function findGame(nameOrAlias) {
+    return BY_ALIAS.get(String(nameOrAlias || '').toLowerCase().trim()) || null;
+}
+
+const points = (n) => `*+${n}* ${n === 1 ? 'pt' : 'pts'}`;
+const pt = (n) => `${n} ${n === 1 ? 'pt' : 'pts'}`;
+
+// ─── Pure helpers ────────────────────────────────────────────────────────────
+/** Lowercase, accent- and punctuation-free form used for answer matching. */
+export function normalizeAnswer(s) {
+    return String(s ?? '')
+        .toLowerCase()
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Does this message answer the question?
+ *
+ * Exact match always counts. A longer answer is also accepted inside a short
+ * sentence ("I think it is Islamabad") — but never for a short or numeric
+ * answer, otherwise "1" would match half the chat.
+ */
+export function answerMatches(text, accepted = []) {
+    const t = normalizeAnswer(text);
+    if (!t) return false;
+    const words = t.split(' ').length;
+
+    for (const raw of accepted) {
+        const a = normalizeAnswer(raw);
+        if (!a) continue;
+        if (t === a) return true;
+        if (a.length <= 3 || /^\d+$/.test(a)) continue;
+        if (words <= 8 && new RegExp(`(^|\\s)${escapeRe(a)}(\\s|$)`).test(t)) return true;
+    }
+    return false;
+}
+
+/** First integer in a short message, or null ("42", "-3", "= 42", "i say 42"). */
+export function parseNumberAnswer(text) {
+    const raw = String(text ?? '').trim();
+    if (!raw) return null;
+    if (raw.split(/\s+/).length > 4) return null;          // too chatty to be an answer
+    const m = raw.match(/-?\d+/);
+    if (!m) return null;
+    const n = Number(m[0]);
+    return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * How close was that? Five bands so the number game has real feedback instead of
+ * a plain "wrong" — the whole point of a guessing game.
+ */
+export function hotCold(guess, answer, min, max) {
+    const span = Math.max(1, Math.abs(max - min));
+    const frac = Math.abs(guess - answer) / span;
+    if (frac === 0) return '🎯 spot on';
+    if (frac <= 0.02) return '🔥 scorching';
+    if (frac <= 0.06) return '♨️ hot';
+    if (frac <= 0.14) return '🌤️ warm';
+    if (frac <= 0.30) return '❄️ cold';
+    return '🧊 freezing';
+}
+
+/** Shuffled letters that never come out as the original word. */
+export function scrambleWord(word, random = Math.random) {
+    const clean = String(word || '').toLowerCase();
+    if (clean.length < 3) return clean;
+    for (let attempt = 0; attempt < 8; attempt++) {
+        const out = shuffle([...clean], random).join('');
+        if (out !== clean) return out;
+    }
+    // a word made of one repeated letter (rare) — rotate instead
+    return clean.slice(1) + clean[0];
+}
+
+/**
+ * A random arithmetic problem. easy = one operation, hard = two operations.
+ * @returns {{question:string, answer:number, level:'easy'|'hard', points:number}}
+ */
+export function makeMath(level = 'easy', random = Math.random) {
+    if (level === 'hard') {
+        const a = randomInt(2, 12, random);
+        const b = randomInt(2, 12, random);
+        const c = randomInt(2, 20, random);
+        if (random() < 0.5) {
+            return { question: `${a} × ${b} + ${c}`, answer: a * b + c, level, points: 8 };
+        }
+        return { question: `(${a} + ${c}) × ${b}`, answer: (a + c) * b, level, points: 8 };
+    }
+    const kind = randomInt(0, 2, random);
+    if (kind === 0) {
+        const a = randomInt(11, 99, random);
+        const b = randomInt(11, 99, random);
+        return { question: `${a} + ${b}`, answer: a + b, level, points: GAME_POINTS.math };
+    }
+    if (kind === 1) {
+        const a = randomInt(30, 99, random);
+        const b = randomInt(2, a - 1, random);
+        return { question: `${a} − ${b}`, answer: a - b, level, points: GAME_POINTS.math };
+    }
+    const a = randomInt(2, 12, random);
+    const b = randomInt(2, 12, random);
+    return { question: `${a} × ${b}`, answer: a * b, level, points: GAME_POINTS.math };
+}
+
+// ─── Engine ──────────────────────────────────────────────────────────────────
+const REVEAL = {
+    number  : (r) => `the number was *${r.answer}*`,
+    dice    : (r) => `the die was *${r.answer}*`,
+    coin    : (r) => `the coin was *${r.answer}*`,
+    slots   : (r) => `the reels were *${r.reels.join(' ')}*`,
+    math    : (r) => `the answer was *${r.answer}*`,
+    scramble: (r) => `the word was *${r.answer}*`,
+    trivia  : (r) => `the answer was *${r.accepted[0]}*`
+};
+
+export function createGameEngine({
+    config = {},
+    log,
+    scores,
+    groups,
+    random = Math.random,
+    now = () => Date.now(),
+    send = null,                 // (jid, text) => Promise — used for timed-out rounds
+    autoSweep = true
+} = {}) {
+    const timeoutMs   = Number.isFinite(config.gameTimeoutMs) ? config.gameTimeoutMs : 180_000;
+    const cooldownMs  = Number.isFinite(config.gameCooldownMs) ? config.gameCooldownMs : 15_000;
+    const maxAttempts = Number.isFinite(config.gameMaxAttempts) ? config.gameMaxAttempts : 12;
+
+    const rounds = new Map();           // jid → round
+    const cooldowns = new Map();        // jid → timestamp a new round may start
+    const participationAt = new Map();  // "jid|playerKey" → when they last earned one
+    let timer = null;
+
+    // ── small helpers ────────────────────────────────────────────────────────
+    async function labelOf(ctx) {
+        for (const id of idsOf(ctx)) {
+            const name = await ctx.groups?.nameOf?.(ctx.jid, id);
+            if (name) return name;
+        }
+        return String(ctx.msg?.pushName || '').trim()
+            || String(ctx.senderLabel || '').replace(/@.*/, '')
+            || 'player';
+    }
+
+    const active = (jid) => rounds.get(jid) || null;
+
+    /**
+     * Every identity the sender can be known by, including the LID ↔ phone
+     * number translation the router offers. The scoreboard must never end up
+     * with two rows for one member just because the group addressed them by
+     * their anonymous id.
+     */
+    function idsOf(ctx) {
+        const out = new Set(ctx.senderIds || []);
+        for (const id of [...out]) {
+            for (const alt of ctx.expandIds?.(id) || []) {
+                if (alt) out.add(alt);
+            }
+        }
+        return out;
+    }
+
+    /** Who is talking, in the form the score store wants. */
+    const whoOf = (ctx, name) => ({ ids: idsOf(ctx), name });
+
+    function keyOf(ctx) {
+        const ids = idsOf(ctx);
+        return scores?.keyOf?.(ctx.jid, ids) || [...ids].sort()[0] || String(ctx.senderLabel || '');
+    }
+
+    /** Remember any identity we have not seen for this player before. */
+    function rememberIds(ctx, key) {
+        if (!scores?.link) return;
+        for (const id of idsOf(ctx)) scores.link(ctx.jid, [key], id);
+    }
+
+    function playerEntry(round, key, label, ids) {
+        let entry = round.players.get(key);
+        if (!entry) {
+            entry = { key, ids: [...(ids || [])], label, guesses: 0, earned: 0, tried: new Set() };
+            round.players.set(key, entry);
+        } else if (label && label !== entry.label) {
+            entry.label = label;
+        }
+        return entry;
+    }
+
+    /**
+     * The first attempt in a round earns a participation point — everyone who
+     * plays contributes to the scoreboard.
+     *
+     * The point is rate-limited per member per cooldown window: without that,
+     * starting a round, guessing once and immediately replacing the round would
+     * mint a point every few seconds. Rounds themselves stay unlimited.
+     */
+    function touchParticipation(round, entry, ctx, label) {
+        if (!scores || entry.played) return;
+        entry.played = true;
+        scores.visit(round.chat, whoOf(ctx, label));      // rounds played always count
+
+        const stamp = `${round.chat}|${entry.key}`;
+        if (now() - (participationAt.get(stamp) || 0) < cooldownMs) return;
+        participationAt.set(stamp, now());
+        scores.award(round.chat, whoOf(ctx, label), PARTICIPATION_POINTS);
+        entry.earned += PARTICIPATION_POINTS;
+    }
+
+    // ── rendering ────────────────────────────────────────────────────────────
+    function listText() {
+        const lines = ['🎮 *Games* — everyone can play, everyone earns points', ''];
+        GAMES.forEach((g, i) => {
+            lines.push(`${i + 1}. ${g.emoji} *${g.name}* — ${g.blurb}`);
+            lines.push(`   \`${g.how}\``);
+        });
+        lines.push(
+            '',
+            '*Scores & more*',
+            '```',
+            '!game top        leaderboard of this chat',
+            '!game top all    leaderboard across all chats',
+            '!game me         your own score card',
+            '!game stop       end the round in play',
+            `!game addq Q ; A  contribute a trivia question (+${CONTRIBUTION_POINTS} pts)`,
+            '```',
+            `Quick random: !random [n|1-100|a, b, c] · !roll 2d6 · !flip · !pick a, b · !shuffle a, b · !8ball <question>`
+        );
+        return lines.join('\n');
+    }
+
+    function helpText() {
+        const lines = ['📖 *How to play*', ''];
+        for (const g of GAMES) {
+            lines.push(`${g.emoji} *${g.name}* — ${g.title} · ${g.points} pts`);
+            lines.push(`  \`${g.how}\``);
+            lines.push(`  ${g.blurb}`);
+            lines.push('');
+        }
+        lines.push(
+            'Everyone who takes part is on the scoreboard; the first right answer',
+            'wins the round, and wrong guesses get hints. One game per chat at a',
+            'time — the round also ends by itself if nobody finds it in time.'
+        );
+        return lines.join('\n');
+    }
+
+    function medal(i) {
+        return ['🥇', '🥈', '🥉'][i] || `${i + 1}.`;
+    }
+
+    function boardText(ctx, scope = '') {
+        const all = /^(all|global|everywhere)$/i.test(String(scope || ''));
+        const rows = all ? scores?.boardAll(12) : scores?.board(ctx.jid, 12);
+        if (!rows?.length) {
+            return all
+                ? '🏆 Nobody has played yet. Start a round: *!game*'
+                : '🏆 Nobody here has played yet. Start a round: *!game*';
+        }
+        const { players, points: total } = all
+            ? { players: rows.length, points: rows.reduce((n, r) => n + r.points, 0) }
+            : scores.totals(ctx.jid);
+
+        const head = all ? '🏆 *Top players (all chats)*' : `🏆 *Top players — ${ctx.chatName || 'this chat'}*`;
+        const lines = rows.map((r, i) => {
+            const name = r.name || String(r.key).replace(/@.*/, '');
+            const streak = r.streak > 1 ? ` · 🔥${r.streak}` : '';
+            const chats = all ? ` · ${r.chats} chat${r.chats === 1 ? '' : 's'}` : '';
+            return `${medal(i)} ${name} — ${pt(r.points)} · ${r.wins} win${r.wins === 1 ? '' : 's'}${streak}${chats}`;
+        });
+        lines.push('', `_${players} player${players === 1 ? '' : 's'} · ${total} points${all ? ' total' : ''}_`);
+        return [head, ...lines].join('\n');
+    }
+
+    function meText(ctx) {
+        const key = keyOf(ctx);
+        const rows = scores?.board(ctx.jid, Number.MAX_SAFE_INTEGER) || [];
+        const row = rows.find((r) => r.key === key);
+        if (!row) {
+            return '👤 You are not on the board yet — join a round with *!game* and take a guess.';
+        }
+        const name = row.name || String(row.key).replace(/@.*/, '');
+        const rank = rows.findIndex((r) => r.key === key) + 1;
+        return [
+            `👤 *${name}*`,
+            `${pt(row.points)} · ${row.wins} win${row.wins === 1 ? '' : 's'} in ${row.played} round${row.played === 1 ? '' : 's'}`,
+            `Rank #${rank} of ${rows.length} here${row.best > 1 ? ` · best streak ${row.best}` : ''}`
+        ].join('\n');
+    }
+
+    // ── starting a round ─────────────────────────────────────────────────────
+    function newRound(ctx, game, starterKey, starterLabel) {
+        return {
+            chat: ctx.jid,
+            name: game.name,
+            emoji: game.emoji,
+            mode: game.mode,
+            game,
+            starterKey,
+            starterLabel,
+            startedAt: now(),
+            endsAt: now() + timeoutMs,
+            players: new Map(),
+            wrong: 0,
+            hinted: false,
+            closed: false
+        };
+    }
+
+    /** Build the round + the opening message for one game. */
+    function build(ctx, game, args, starterKey, starterLabel) {
+        const round = newRound(ctx, game, starterKey, starterLabel);
+        const left = Math.round(timeoutMs / 1000);
+        const tail = `\n\n_${left}s · !game stop to end · !game top for scores_`;
+
+        switch (game.name) {
+            case 'number': {
+                const range = parseRange(args.join(' ')) || { min: 1, max: 100 };
+                if (range.max - range.min > 100_000) {
+                    return { error: 'That range is too wide — try something like `!game number 1-500`.' };
+                }
+                round.min = range.min;
+                round.max = range.max;
+                round.answer = randomInt(range.min, range.max, random);
+                return {
+                    round,
+                    text: `${game.emoji} *Guess the number* — I picked one between *${range.min}* and *${range.max}*.\n`
+                        + 'Send a number. I answer too high / too low, and how warm you are.' + tail
+                };
+            }
+
+            case 'dice': {
+                round.answer = randomInt(1, 6, random);
+                return {
+                    round,
+                    text: `${game.emoji} *Dice* — I rolled one. Guess the face: 1 to 6.\n`
+                        + `First exact guess takes ${game.points} pts.` + tail
+                };
+            }
+
+            case 'coin': {
+                round.answer = random() < 0.5 ? 'Heads' : 'Tails';
+                return {
+                    round,
+                    text: `${game.emoji} *Coin toss* — the coin is already in the air.\n`
+                        + `Say *heads* or *tails*. Right call = ${game.points} pts.` + tail
+                };
+            }
+
+            case 'slots': {
+                round.reels = slotReels({ count: 3, sides: 9 }, random);
+                return {
+                    round,
+                    text: `${game.emoji} *Slots* — three reels, each 1-9.\n`
+                        + 'Pick your lucky digit with `!guess 7` (one pick each).\n'
+                        + `Three of a kind = ${GAME_POINTS.slots} pts · a pair = 3 pts.` + tail
+                };
+            }
+
+            case 'math': {
+                const level = /hard|difficult|2|two/i.test(args.join(' ')) ? 'hard' : 'easy';
+                const problem = makeMath(level, random);
+                round.answer = problem.answer;
+                round.problem = problem;
+                return {
+                    round,
+                    text: `${game.emoji} *Maths* (${problem.level}) — first correct answer wins ${problem.points} pts.\n\n`
+                        + `*${problem.question} = ?*` + tail
+                };
+            }
+
+            case 'scramble': {
+                const word = pickOne(WORDS, random) || 'garden';
+                round.answer = word;
+                round.accepted = [word];
+                round.scrambled = scrambleWord(word, random);
+                return {
+                    round,
+                    text: `${game.emoji} *Word scramble* — ${word.length} letters, first correct word wins ${game.points} pts\n\n`
+                        + `🔀 *${round.scrambled.toUpperCase()}*` + tail
+                };
+            }
+
+            case 'trivia': {
+                const entry = pickQuestion(ctx.jid);
+                if (!entry) return { error: 'The trivia pool is empty.' };
+                round.pool = entry;
+                round.accepted = entry.a;
+                lastQuestion.set(ctx.jid, entry.q);
+                return {
+                    round,
+                    text: `${game.emoji} *Trivia* — first correct answer wins ${game.points} pts\n\n`
+                        + `❓ *${entry.q}*`
+                        + (entry.by ? `\n_by ${entry.by}_` : '')
+                        + tail
+                };
+            }
+
+            case 'lucky': {
+                round.drawAt = now() + Math.min(timeoutMs, 90_000);
+                round.endsAt = round.drawAt;
+                return {
+                    round,
+                    text: `${game.emoji} *Lucky draw* — join with \`!in\`\n\n`
+                        + `Everyone who joins earns ${PARTICIPATION_POINTS} pt, and the random winner takes ${game.points} pts.\n`
+                        + '_!game draw picks the winner right now._'
+                };
+            }
+
+            default:
+                return { error: 'Unknown game.' };
+        }
+    }
+
+    const lastQuestion = new Map();
+
+    /** A trivia question from the built-in pool plus what members contributed. */
+    function pickQuestion(jid) {
+        const contributed = (scores?.questions?.() || []).map((e) => ({ q: e.q, a: e.a, by: e.by }));
+        const pool = [...TRIVIA, ...contributed];
+        if (!pool.length) return null;
+        const previous = lastQuestion.get(jid);
+        for (let i = 0; i < 4; i++) {
+            const pick = pickOne(pool, random);
+            if (pick && pick.q !== previous) return pick;
+        }
+        return pickOne(pool, random);
+    }
+
+    // ── attempts ─────────────────────────────────────────────────────────────
+    /**
+     * One hint per round, dropped after four wrong guesses — enough to keep a
+     * stuck group playing, late enough that it does not hand the round over.
+     */
+    function hintFor(round) {
+        switch (round.name) {
+            case 'number': {
+                const mid = Math.floor((round.min + round.max) / 2);
+                return round.answer <= mid
+                    ? `💡 It is in the lower half: *${round.min}–${mid}*`
+                    : `💡 It is in the upper half: *${mid + 1}–${round.max}*`;
+            }
+            case 'scramble': return `💡 It starts with *${String(round.answer)[0].toUpperCase()}*`;
+            case 'trivia':   return `💡 The answer starts with *${String(round.accepted[0])[0].toUpperCase()}*`;
+            case 'dice':     return round.answer > 3 ? '💡 It is 4, 5 or 6' : '💡 It is 1, 2 or 3';
+            case 'coin':     return '💡 It begins with H or T, of course';
+            case 'math':     return `💡 The answer is ${round.answer % 2 === 0 ? 'even' : 'odd'}`;
+            case 'slots':    return '💡 A digit with a friend on the reels: ask the ones who played';
+            default:         return '';
+        }
+    }
+
+    /**
+     * Score one attempt.
+     * @param {object} ctx
+     * @param {string} text      what the player sent
+     * @param {boolean} explicit true for "!guess x" (the player is clearly trying)
+     * @returns {Promise<{handled:boolean, reply?:string, react?:string, wrong?:boolean}>}
+     */
+    async function takeAttempt(ctx, text, explicit) {
+        const round = active(ctx.jid);
+        if (!round || round.closed) {
+            return explicit
+                ? { handled: true, react: '😴', reply: 'No game is running here. Start one with *!game*' }
+                : { handled: false };
+        }
+
+        const label = await labelOf(ctx);
+        const key = keyOf(ctx);
+        const entry = playerEntry(round, key, label, idsOf(ctx));
+        rememberIds(ctx, key);
+
+        const perPlayer = round.name === 'slots' ? 1 : maxAttempts;
+        if (entry.guesses >= perPlayer) {
+            return {
+                handled: true,
+                react: '🚫',
+                reply: round.name === 'slots'
+                    ? '🎰 One pick each — wait for the reels to stop.'
+                    : `🚫 You have used your ${perPlayer} guesses here — let someone else try!`
+            };
+        }
+
+        const before = entry.guesses;
+        const verdict = score(round, entry, text, explicit);
+
+        if (verdict.kind === 'ignore') {
+            return explicit && verdict.reason
+                ? { handled: true, react: '⚠️', reply: verdict.reason }
+                : { handled: false };
+        }
+
+        if (verdict.kind === 'repeat') {
+            return { handled: true, react: '♻️', reply: `♻️ You already tried *${verdict.value}*` };
+        }
+
+        entry.guesses = before + 1;
+
+        // ── wrong ────────────────────────────────────────────────────────────
+        if (verdict.kind === 'wrong') {
+            round.wrong++;
+            touchParticipation(round, entry, ctx, label);
+            let hint = null;
+            if (!round.hinted && round.wrong >= 4) {
+                hint = hintFor(round);
+                if (hint) round.hinted = true;
+            }
+            // A small answer space does not need a line of text per wrong guess,
+            // so the ❌ reaction is the whole answer unless there is something to
+            // say (the number game always has a direction + a warmth).
+            const closing = verdict.closing ? endRound(round.chat, { head: '', reason: 'exhausted' }) : null;
+            const reply = [verdict.reply, hint, closing].filter(Boolean).join('\n\n');
+            return { handled: true, wrong: true, react: '❌', reply: reply || undefined };
+        }
+
+        // ── scored ───────────────────────────────────────────────────────────
+        const won = verdict.points;
+
+        if (verdict.kind === 'payout') {
+            // Slots pays per player and keeps the round open for the others.
+            entry.earned += won;
+            if (won > 0) scores?.award(round.chat, whoOf(ctx, label), won);
+            touchParticipation(round, entry, ctx, label);
+            log?.debug?.(`game: ${label} scored ${won} on ${round.name} in ${round.chat}`);
+
+            const full = whichPlays(round) >= 8;
+            if (verdict.jackpot || full) {
+                const summary = endRound(round.chat, { winnerKey: key, head: verdict.jackpot ? '' : undefined, reason: 'full' });
+                return {
+                    handled: true,
+                    react: verdict.jackpot ? '🎉' : '✅',
+                    reply: [verdict.reply, summary].filter(Boolean).join('\n\n')
+                };
+            }
+            return { handled: true, react: won > 0 ? '✅' : '❌', reply: verdict.reply };
+        }
+
+        // a win: score it, apply the streak bonus, then close the round.
+        // The first attempt of a round counts as playing whether it wins or not.
+        touchParticipation(round, entry, ctx, label);
+        const scored = scores?.win(round.chat, whoOf(ctx, label), won) || { bonus: 0, streak: 1 };
+        entry.earned += won + (scored.bonus || 0);
+        const bonusLine = scored.bonus ? ` _(+${scored.bonus} streak bonus 🔥${scored.streak})_` : '';
+        const guessLine = ` · ${entry.guesses} guess${entry.guesses === 1 ? '' : 'es'}`;
+
+        const reply = `🎉 *${label}* wins! ${REVEAL[round.name]?.(round) || ''}`.trim()
+            + `\n${points(won)}${bonusLine}${guessLine}`;
+
+        const summary = endRound(round.chat, { winnerKey: key, head: '', reason: 'win' });
+        return { handled: true, react: '🎉', reply: summary ? `${reply}\n\n${summary}` : reply };
+    }
+
+    const whichPlays = (round) => [...round.players.values()].reduce((n, p) => n + p.guesses, 0);
+
+    /**
+     * The per-game rules: does this text answer the round, and what happens?
+     * @returns {{kind:'win'|'payout'|'wrong'|'repeat'|'ignore', points?:number, reply?:string, reason?:string, value?:any}}
+     */
+    function score(round, entry, text, explicit) {
+        const raw = String(text ?? '').trim();
+
+        switch (round.name) {
+            case 'number': {
+                const n = parseNumberAnswer(raw);
+                if (n === null) {
+                    return explicit ? { kind: 'ignore', reason: 'Send a number, e.g. `!guess 42`.' } : { kind: 'ignore' };
+                }
+                if (n < round.min || n > round.max) {
+                    return explicit
+                        ? { kind: 'ignore', reason: `Pick a number between ${round.min} and ${round.max}.` }
+                        : { kind: 'ignore' };
+                }
+                if (entry.tried.has(n)) return { kind: 'repeat', value: n };
+                entry.tried.add(n);
+                if (n === round.answer) {
+                    return { kind: 'win', points: Math.max(4, GAME_POINTS.number - entry.guesses) };
+                }
+                const dir = n < round.answer ? '📈 Too low — go higher' : '📉 Too high — go lower';
+                return { kind: 'wrong', reply: `${dir} · ${hotCold(n, round.answer, round.min, round.max)}` };
+            }
+
+            case 'dice': {
+                const n = parseNumberAnswer(raw);
+                if (n === null || n < 1 || n > 6) {
+                    return explicit ? { kind: 'ignore', reason: 'Guess a die face: 1 to 6.' } : { kind: 'ignore' };
+                }
+                if (entry.tried.has(n)) return { kind: 'repeat', value: n };
+                entry.tried.add(n);
+                if (n === round.answer) return { kind: 'win', points: GAME_POINTS.dice };
+                return { kind: 'wrong', reply: `📉 Mine is ${n < round.answer ? 'higher' : 'lower'} than ${n}` };
+            }
+
+            case 'coin': {
+                const call = parseCoinCall(raw);
+                if (call === null) {
+                    return explicit ? { kind: 'ignore', reason: 'Say *heads* or *tails*.' } : { kind: 'ignore' };
+                }
+                const value = call ? 'Heads' : 'Tails';
+                if (entry.tried.has(value)) return { kind: 'repeat', value };
+                entry.tried.add(value);
+                if (entry.tried.size >= 2) {
+                    // both calls are in — nothing is left to try, so the round
+                    // closes and the coin is revealed
+                    return {
+                        kind: 'wrong',
+                        closing: true,
+                        reply: `❌ Both calls are gone — the coin was *${round.answer}*`
+                    };
+                }
+                if (value === round.answer) return { kind: 'win', points: GAME_POINTS.coin };
+                return { kind: 'wrong' };
+            }
+
+            case 'slots': {
+                const digit = parseNumberAnswer(raw);
+                if (digit === null || digit < 1 || digit > 9) {
+                    return explicit ? { kind: 'ignore', reason: 'Pick a lucky digit: 1 to 9.' } : { kind: 'ignore' };
+                }
+                const matches = round.reels.filter((r) => r === digit).length;
+                const won = matches === 3 ? GAME_POINTS.slots : matches === 2 ? 3 : 0;
+                const reply = matches === 0
+                    ? undefined
+                    : `${round.emoji} ${'*' + digit + '* → '}${matches === 3 ? 'THREE of a kind! 🎉' : 'two on the reels ✨'}`;
+                return { kind: 'payout', points: won, reply, jackpot: matches === 3 };
+            }
+
+            case 'math': {
+                const n = parseNumberAnswer(raw);
+                if (n === null) {
+                    return explicit ? { kind: 'ignore', reason: `Send the answer to ${round.problem.question}` } : { kind: 'ignore' };
+                }
+                if (entry.tried.has(n)) return { kind: 'repeat', value: n };
+                entry.tried.add(n);
+                if (n === round.answer) return { kind: 'win', points: round.problem.points };
+                return { kind: 'wrong', reply: explicit ? `❌ ${n} is not it` : undefined };
+            }
+
+            case 'scramble': {
+                const guess = normalizeAnswer(raw);
+                if (!guess || !/^[\p{L} ]{3,24}$/u.test(guess)) {
+                    return explicit ? { kind: 'ignore', reason: 'Send one word.' } : { kind: 'ignore' };
+                }
+                if (entry.tried.has(guess)) return { kind: 'repeat', value: guess };
+                entry.tried.add(guess);
+                if (answerMatches(raw, round.accepted)) return { kind: 'win', points: GAME_POINTS.scramble };
+                return { kind: 'wrong' };
+            }
+
+            case 'trivia': {
+                if (answerMatches(raw, round.accepted)) {
+                    const norm = normalizeAnswer(raw);
+                    if (entry.tried.has(norm)) return { kind: 'repeat', value: raw };
+                    return { kind: 'win', points: GAME_POINTS.trivia };
+                }
+                if (!explicit) return { kind: 'ignore' };          // plain chat, not an answer
+                const norm = normalizeAnswer(raw);
+                if (entry.tried.has(norm)) return { kind: 'repeat', value: raw };
+                entry.tried.add(norm);
+                return { kind: 'wrong', reply: `❌ ${raw} is not it` };
+            }
+
+            default:
+                return { kind: 'ignore' };
+        }
+    }
+
+    // ── ending a round ───────────────────────────────────────────────────────
+    /**
+     * Close the round in this chat, end the streak of everyone who did not win,
+     * and build the wrap-up that lists what each player earned.
+     *
+     * @param {string} [head] the first line; `''` suppresses it (used when the
+     *        caller has already announced the result), `undefined` uses the
+     *        default "no winner this time — the answer was …" line.
+     */
+    function endRound(jid, { winnerKey = null, reason = 'stop', head = undefined } = {}) {
+        const round = rounds.get(jid);
+        if (!round) return null;
+        round.closed = true;
+        rounds.delete(jid);
+        cooldowns.set(jid, now() + cooldownMs);
+
+        const rows = [...round.players.values()];
+        for (const p of rows) {
+            if (p.key !== winnerKey) scores?.loseStreak?.(jid, p.ids);
+        }
+        log?.debug?.(`game: ${round.name} in ${jid} ended (${reason})`);
+
+        const played = rows.filter((p) => p.earned > 0);
+        const reveal = REVEAL[round.name] ? REVEAL[round.name](round) : '';
+        // A payout game (slots) can end with several members having scored, so
+        // "no winner" would be wrong there — it just reports the reels.
+        const title = head !== undefined
+            ? head
+            : (reveal
+                ? `⏰ ${round.mode === 'payout' ? 'Round over' : 'No winner this time'} — ${reveal}.`
+                : '⏰ Time is up.');
+
+        const lines = [
+            title,
+            played.length ? `🎮 ${played.map((p) => `${p.label} +${p.earned}`).join(' · ')}` : null,
+            `Next round: \`!game ${round.name}\` · scores: \`!game top\``
+        ];
+        return lines.filter(Boolean).join('\n');
+    }
+
+    /** A lucky round's winner is drawn, never guessed. */
+    function drawLucky(jid, { manual = false } = {}) {
+        const round = rounds.get(jid);
+        if (!round || round.name !== 'lucky') return null;
+
+        const rows = [...round.players.values()];
+        if (!rows.length) {
+            return endRound(jid, {
+                reason: 'empty',
+                head: '🎁 Nobody joined the draw — no winner this time.'
+            });
+        }
+        const winner = pickOne(rows, random);
+        const label = winner.label;
+        const scored = scores?.win(jid, { ids: winner.ids, name: label }, GAME_POINTS.lucky) || { bonus: 0, streak: 1 };
+        const bonus = scored.bonus || 0;
+        const names = rows.map((r) => r.label);
+
+        // `earned` is what the winner actually collected: the joining point (if
+        // this round was their first within the cooldown window) plus the draw.
+        winner.earned += GAME_POINTS.lucky + bonus;
+
+        const text = [
+            `🎁 *${label}* wins the lucky draw!`,
+            `${points(winner.earned)}${bonus ? ` _(+${bonus} streak bonus 🔥${scored.streak})_` : ''}`
+                + ` · ${rows.length} entr${rows.length === 1 ? 'y' : 'ies'}: ${names.join(', ')}`,
+            manual ? '_drawn early by request_' : null,
+            `Next round: \`!game lucky\` · scores: \`!game top\``
+        ].filter(Boolean).join('\n');
+
+        round.closed = true;
+        rounds.delete(jid);
+        cooldowns.set(jid, now() + cooldownMs);
+        return text;
+    }
+
+    // ── !game subcommands ────────────────────────────────────────────────────
+    async function handle(ctx, args = []) {
+        const sub = String(args[0] || '').toLowerCase();
+
+        if (!sub || sub === 'list' || sub === 'games') return { handled: true, reply: listText() };
+        if (sub === 'help' || sub === 'how' || sub === 'rules') return { handled: true, reply: helpText() };
+        if (sub === 'top' || sub === 'board' || sub === 'leaderboard' || sub === 'scores') {
+            return { handled: true, reply: boardText(ctx, args[1]) };
+        }
+        if (sub === 'me' || sub === 'mine' || sub === 'stats') {
+            return { handled: true, reply: meText(ctx) };
+        }
+        if (sub === 'addq' || sub === 'add' || sub === 'contribute') {
+            return addQuestion(ctx, args.slice(1));
+        }
+        if (sub === 'stop' || sub === 'end' || sub === 'quit' || sub === 'cancel') {
+            return stopRound(ctx);
+        }
+
+        const game = findGame(sub);
+        if (!game) {
+            return {
+                handled: true,
+                react: '⚠️',
+                reply: `⚠️ I do not know the game *${args[0]}*. Send *!game* for the list.`
+            };
+        }
+
+        // With a draw already open, "!game lucky" means join it and
+        // "!game draw" means pick the winner now — both are what you would type.
+        const current = active(ctx.jid);
+        if (game.name === 'lucky' && current?.name === 'lucky') {
+            if (sub === 'draw') {
+                const text = drawLucky(ctx.jid, { manual: true });
+                return text
+                    ? { handled: true, react: '🎁', reply: text }
+                    : { handled: true, react: 'ℹ️', reply: 'No draw is open here.' };
+            }
+            return join(ctx);
+        }
+
+        return start(ctx, game, args.slice(1));
+    }
+
+    async function start(ctx, game, args) {
+        const current = active(ctx.jid);
+        const key = keyOf(ctx);
+        const label = await labelOf(ctx);
+
+        if (current) {
+            if (current.name === game.name && game.name === 'lucky') return join(ctx);
+            const mine = current.starterKey === key;
+            if (!mine && !ctx.isOwner) {
+                return {
+                    handled: true,
+                    react: '⏳',
+                    reply: `⏳ A *${current.name}* round by ${current.starterLabel} is still running.\n`
+                        + 'Play that one, or wait for it to end.'
+                };
+            }
+            endRound(ctx.jid, { reason: 'replaced' });
+        }
+
+        // The breather only applies to starting fresh: replacing a round that is
+        // still running is a deliberate restart, not a way to farm points (the
+        // participation point is rate-limited separately).
+        const until = cooldowns.get(ctx.jid) || 0;
+        if (!current && now() < until && !ctx.isOwner) {
+            const left = Math.ceil((until - now()) / 1000);
+            return { handled: true, react: '⏳', reply: `⏳ Give the last round a ${left}s breather, then start again.` };
+        }
+
+        const built = build(ctx, game, args, key, label);
+        if (built.error) return { handled: true, react: '⚠️', reply: `⚠️ ${built.error}` };
+
+        rounds.set(ctx.jid, built.round);
+        // The starter is registered straight away, but only counts a round as
+        // played (and earns the participation point) once they actually try.
+        playerEntry(built.round, key, label, ctx.senderIds);
+
+        if (game.name === 'lucky') {
+            const injected = joinInternal(built.round, ctx, label);
+            return { handled: true, react: game.emoji, reply: `${built.text}\n\n🎟️ ${injected.reply}` };
+        }
+
+        log?.info?.(`game: ${label} started ${game.name} in ${ctx.jid}`);
+        return { handled: true, react: game.emoji, reply: built.text };
+    }
+
+    function stopRound(ctx) {
+        const round = active(ctx.jid);
+        if (!round) return { handled: true, react: 'ℹ️', reply: 'ℹ️ No game is running here.' };
+        const mine = round.starterKey === keyOf(ctx);
+
+        if (!mine && !ctx.isOwner) {
+            return {
+                handled: true,
+                react: '⛔',
+                reply: `⛔ Only ${round.starterLabel} (who started it) or the bot owner can stop this round.`
+            };
+        }
+        if (round.name === 'lucky') {
+            const text = drawLucky(ctx.jid) || 'No draw is open here.';
+            return { handled: true, react: '🎁', reply: text };
+        }
+        const text = endRound(ctx.jid, { reason: 'stop' }) || 'No game is running here.';
+        return { handled: true, react: '🛑', reply: text };
+    }
+
+    // ── joining (lucky draw) ─────────────────────────────────────────────────
+    function joinInternal(round, ctx, label) {
+        const key = keyOf(ctx);
+        const existing = round.players.get(key);
+        if (existing?.joined) return { ok: false, reply: `${label}, you are already in the draw (${round.players.size} joined).` };
+
+        const entry = playerEntry(round, key, label, idsOf(ctx));
+        rememberIds(ctx, key);
+        entry.joined = true;
+        touchParticipation(round, entry, ctx, label);   // sets `played` and credits the point
+
+        const seconds = Math.max(0, Math.round((round.endsAt - now()) / 1000));
+        return {
+            ok: true,
+            reply: `${label} is in! ${round.players.size} joined · draw in ~${seconds}s (!game draw to pick now).`
+        };
+    }
+
+    async function join(ctx) {
+        const round = active(ctx.jid);
+        if (round?.name !== 'lucky') {
+            return { handled: true, react: '⚠️', reply: '⚠️ No draw is open. Start one with *!game lucky*' };
+        }
+        const label = await labelOf(ctx);
+        const out = joinInternal(round, ctx, label);
+        return { handled: true, react: out.ok ? '🎟️' : 'ℹ️', reply: out.reply };
+    }
+
+    // ── !guess and plain replies ─────────────────────────────────────────────
+    async function guess(ctx, args = []) {
+        const text = (args || []).join(' ').trim()
+            || String(ctx.text || '').replace(/^!\S*\s*/, '').trim();
+        if (!text) {
+            return { handled: true, react: '⚠️', reply: 'Usage: `!guess <answer>` — or just send the answer.' };
+        }
+        return takeAttempt(ctx, text, true);
+    }
+
+    /**
+     * The plain-message path. Deliberately strict: while a round is running,
+     * only text that plainly looks like an answer is treated as one, so normal
+     * chat keeps flowing to the quiz solver untouched.
+     */
+    async function handleMessage(ctx) {
+        const round = active(ctx.jid);
+        if (!round || round.closed) return { handled: false };
+
+        const text = String(ctx.text || '').trim();
+        if (!text || text.startsWith('!')) return { handled: false };
+
+        switch (round.name) {
+            case 'number':
+            case 'math':
+            case 'slots':
+                return /^-?\d+$/.test(text) ? takeAttempt(ctx, text, false) : { handled: false };
+            case 'dice':
+                return /^[1-6]$/.test(text) ? takeAttempt(ctx, text, false) : { handled: false };
+            case 'coin':
+                return parseCoinCall(text) !== null ? takeAttempt(ctx, text, false) : { handled: false };
+            case 'scramble':
+                return /^[\p{L}]{3,24}$/u.test(text) ? takeAttempt(ctx, text, false) : { handled: false };
+            case 'trivia': {
+                // Only a correct answer interrupts a conversation; wrong guesses
+                // are for people who used !guess.
+                return answerMatches(text, round.accepted) ? takeAttempt(ctx, text, false) : { handled: false };
+            }
+            case 'lucky':
+                return /^(!?in|!?join|\+1|me too)$/i.test(text) ? join(ctx) : { handled: false };
+            default:
+                return { handled: false };
+        }
+    }
+
+    // ── contributed trivia ───────────────────────────────────────────────────
+    /**
+     * Members add to the game, not just play it. A question lands in the shared
+     * trivia pool, and the first few contributions earn points — capped, so the
+     * pool cannot be used as a point farm.
+     */
+    function addQuestion(ctx, args) {
+        const raw = args.join(' ').trim();
+        const split = raw.match(/^(.*?)\s*(?:;|\||->)\s*(.+)$/);
+        if (!raw || !split) {
+            return {
+                handled: true,
+                react: '⚠️',
+                reply: '⚠️ Usage: `!game addq Question ; Answer`\n'
+                    + 'Example: `!game addq Which city is the capital of Japan? ; Tokyo`\n'
+                    + '_An / inside the answer adds another accepted spelling._'
+            };
+        }
+
+        const key = keyOf(ctx);
+        const label = labelOfSync(ctx);
+        const result = scores?.addQuestion?.({
+            q: split[1],
+            a: String(split[2]).split('/').map((s) => s.trim()).filter(Boolean),
+            by: label,
+            byKey: key,
+            chat: ctx.jid
+        });
+
+        if (!result) return { handled: true, react: '⚠️', reply: '⚠️ The question pool is not available.' };
+        if (!result.ok) return { handled: true, react: '⚠️', reply: `⚠️ I could not add that: ${result.error}.` };
+
+        const mine = (scores.questions?.() || []).filter((e) => e.byKey && e.byKey === key).length;
+        const credited = mine <= CONTRIBUTION_LIMIT;
+        if (credited) scores.award(ctx.jid, whoOf(ctx, label), CONTRIBUTION_POINTS);
+
+        return {
+            handled: true,
+            react: '✅',
+            reply: `✅ Added to the trivia pool: *${result.entry.q}*\n`
+                + `_Answer: ${result.entry.a.join(' / ')}_ · ${scores.questionCount} questions in the pool`
+                + (credited ? `\n${points(CONTRIBUTION_POINTS)} for contributing 🎓` : '')
+        };
+    }
+
+    /** A synchronous best-effort label for the addq confirmation. */
+    function labelOfSync(ctx) {
+        return String(ctx.msg?.pushName || '').trim()
+            || String(ctx.senderLabel || '').replace(/@.*/, '')
+            || 'member';
+    }
+
+    // ── timers ───────────────────────────────────────────────────────────────
+    /** Close every round whose time is up. Returns what it announced. */
+    async function sweep() {
+        const out = [];
+        for (const [jid, round] of [...rounds]) {
+            if (now() < round.endsAt) continue;
+
+            let text;
+            if (round.name === 'lucky') {
+                text = drawLucky(jid);
+            } else {
+                text = endRound(jid, { reason: 'timeout' });
+            }
+            if (text) {
+                out.push({ chat: jid, game: round.name, text });
+                if (send) {
+                    try {
+                        await send(jid, text);
+                    } catch (err) {
+                        log?.debug?.(`game: could not announce the end of ${round.name} in ${jid}: ${err.message}`);
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    function close() {
+        if (timer) clearInterval(timer);
+        timer = null;
+    }
+
+    if (autoSweep) {
+        timer = setInterval(() => { sweep().catch((err) => log?.debug?.(`game sweep: ${err.message}`)); }, 15_000);
+        timer.unref?.();
+    }
+
+    const api = {
+        handle,
+        guess,
+        join,
+        handleMessage,
+        addQuestion,
+        stop: stopRound,
+        list: listText,
+        help: helpText,
+        board: boardText,
+        active,
+        sweep,
+        close,
+        /** Test/dev hook: finish a round without waiting for the timer. */
+        end: (jid, opts) => endRound(jid, opts),
+        get roundCount() { return rounds.size; }
+    };
+
+    return api;
+}
+
+export default createGameEngine;

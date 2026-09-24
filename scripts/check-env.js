@@ -40,6 +40,9 @@ else { v.errors.forEach((e) => bad(e)); failures++; }
 v.warnings.forEach((w) => warn(w));
 if (cfg.owners.length) dim(`owners: ${cfg.owners.join(', ')}`);
 dim(`flagged from .env: ${cfg.seededFlags.length}`);
+dim(cfg.gamesEnabled
+    ? `games: on · ${cfg.gameTimeoutMs / 1000}s rounds · ${cfg.gameMaxAttempts} guesses each`
+    : 'games: off');
 
 // ── 3. provider keys ─────────────────────────────────────────────────────────
 const TARGETS = {
