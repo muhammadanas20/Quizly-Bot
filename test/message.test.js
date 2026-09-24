@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { classifyKind, extractText, containsTrigger, getQuoted, unwrap, bareJid, isGroupJid, isVisual } from '../src/message.js';
+import { classifyKind, extractText, containsTrigger, getQuoted, unwrap, bareJid, isGroupJid, isVisual, isViewOnce } from '../src/message.js';
 
 const sticker = { stickerMessage: { url: 'x', mimetype: 'image/webp' } };
 const animatedSticker = { stickerMessage: { url: 'x', isAnimated: true } };
@@ -33,6 +33,44 @@ test('classifyKind: sees through viewOnce / ephemeral envelopes', () => {
     assert.equal(classifyKind({ viewOnceMessageV2: { message: image } }), 'image');
     assert.equal(classifyKind({ viewOnceMessageV2Extension: { message: image } }), 'image');
     assert.equal(classifyKind({ ephemeralMessage: { message: { viewOnceMessageV2: { message: image } } } }), 'image');
+});
+
+// ── one-time ("view once") media ─────────────────────────────────────────────
+// The shape that matters most is the one a web-class linked device gets:
+// WhatsApp refuses to send the media, Baileys marks `key.isViewOnce` and there
+// is no message body at all.
+test('isViewOnce: the key flag alone marks a one-time message with no body', () => {
+    assert.equal(isViewOnce(undefined, { isViewOnce: true }), true);
+    assert.equal(isViewOnce({}, { isViewOnce: true }), true);
+});
+
+test('isViewOnce: wrappers, flat media flags and disappearing-message nesting', () => {
+    assert.equal(isViewOnce({ viewOnceMessage: { message: image } }), true);
+    assert.equal(isViewOnce({ viewOnceMessageV2: { message: image } }), true);
+    assert.equal(isViewOnce({ viewOnceMessageV2Extension: { message: audio } }), true);
+    assert.equal(isViewOnce({ ephemeralMessage: { message: { viewOnceMessageV2: { message: image } } } }), true);
+    assert.equal(isViewOnce({ imageMessage: { url: 'x', viewOnce: true } }), true);
+    assert.equal(isViewOnce({ videoMessage: { url: 'x', viewOnce: true } }), true);
+});
+
+test('isViewOnce: ordinary messages are not one-time messages', () => {
+    assert.equal(isViewOnce(image), false);
+    assert.equal(isViewOnce(sticker), false);
+    assert.equal(isViewOnce(text), false);
+    assert.equal(isViewOnce(undefined, {}), false);
+    assert.equal(isViewOnce(undefined, undefined), false);
+});
+
+test('classifyKind: withheld one-time media is "viewonce", not "unknown"', () => {
+    // Baileys hands us exactly this for a web-class companion
+    assert.equal(classifyKind(undefined, { isViewOnce: true }), 'viewonce');
+    assert.equal(classifyKind({ viewOnceMessageV2: { message: null } }), 'viewonce');
+    assert.equal(classifyKind({ viewOnceMessage: {} }, { isViewOnce: true }), 'viewonce');
+});
+
+test('classifyKind: one-time media that DID arrive keeps its real kind', () => {
+    assert.equal(classifyKind({ viewOnceMessageV2: { message: image } }), 'image');
+    assert.equal(classifyKind({ viewOnceMessageV2: { message: video } }), 'video');
 });
 
 test('unwrap: does not loop forever on a self-referencing envelope', () => {

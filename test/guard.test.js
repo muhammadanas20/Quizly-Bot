@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { decide, collectSenderIds, createGuard } from '../src/guard.js';
+import { decide, collectSenderIds, createGuard, withheldViewOnceKey } from '../src/guard.js';
 import { createFlagStore } from '../src/flags.js';
 import { loadConfig } from '../src/config.js';
 import log from '../src/log.js';
@@ -82,6 +83,35 @@ test('decide: system messages and reactions are never revoked', () => {
     for (const kind of ['system', 'reaction', 'unknown']) {
         assert.equal(decide(base({ kind })).act, 'skip');
     }
+});
+
+// ── one-time ("view once") media WhatsApp withheld ───────────────────────────
+// A web-class linked device never receives the media, so all the guard gets is
+// `key.isViewOnce` and a kind of 'viewonce'. It must still be revoked.
+test('decide: withheld one-time media is removed under any photo/video/audio rule', () => {
+    for (const blocked of [['sticker', 'image'], ['image'], ['video'], ['audio'], ['all'], ['viewonce']]) {
+        assert.equal(decide(base({ kind: 'viewonce', blocked })).act, 'delete', `blocked=${blocked}`);
+    }
+});
+
+test('decide: a stickers-only policy leaves withheld one-time media alone', () => {
+    const d = decide(base({ kind: 'viewonce', blocked: ['sticker'] }));
+    assert.equal(d.act, 'skip');
+    assert.equal(d.reason, 'kind-allowed:viewonce');
+});
+
+test('decide: a per-user media override also decides one-time media', () => {
+    const flags = { find: () => ({ key: 'x', entry: { keys: ['x'], media: ['sticker'] } }) };
+    assert.equal(decide(base({ kind: 'viewonce', flags })).reason, 'kind-allowed:viewonce');
+});
+
+test('decide: withheld one-time media still respects every other rule', () => {
+    assert.equal(decide(base({ kind: 'viewonce', isGroup: false })).reason, 'not-a-group');
+    assert.equal(decide(base({ kind: 'viewonce', fromMe: true })).reason, 'own-message');
+    assert.equal(decide(base({ kind: 'viewonce', guardEnabled: false })).reason, 'guard-off');
+    assert.equal(decide(base({ kind: 'viewonce', whitelist: new Set(['923001234567']) })).reason, 'whitelisted');
+    assert.equal(decide(base({ kind: 'viewonce', flags: { find: () => null } })).reason, 'not-flagged');
+    assert.equal(decide(base({ kind: 'viewonce', botIsAdmin: false })).reason, 'bot-not-admin');
 });
 
 // ── identity collection (Baileys 7 LID handling) ─────────────────────────────
@@ -183,6 +213,40 @@ test('guard: photos, including view-once photos, are deleted by default', async 
     assert.deepEqual(sent.map((s) => s.content.delete.id), ['IMG1', 'IMG2']);
 });
 
+test('guard: removes a one-time message whose media WhatsApp withheld', async () => {
+    const { guard, sent, flags } = makeWorld();
+
+    // Exactly what Baileys delivers a web-class companion for a view-once
+    // message: `key.isViewOnce` set, and no message body whatsoever.
+    const withheld = {
+        key    : { remoteJid: GROUP, participant: USER, fromMe: false, id: 'VO1', isViewOnce: true }
+    };
+
+    const verdict = await guard.handle(withheld);
+
+    assert.equal(verdict.act, 'delete', 'the revoke must still happen without the media');
+    assert.equal(sent.length, 1);
+    assert.deepEqual(sent[0].content, { delete: withheld.key });
+    assert.equal(sent[0].jid, GROUP);
+    assert.equal(guard.stats.deleted, 1);
+    assert.equal(guard.stats.viewOnce, 1);
+    assert.equal(flags.find(new Set(['923001234567'])).entry.deleted, 1);
+});
+
+test('guard: a withheld one-time message survives a stickers-only policy', async () => {
+    const { guard, sent } = makeWorld({ guardMedia: 'sticker' });
+    const withheld = { key: { remoteJid: GROUP, participant: USER, fromMe: false, id: 'VO2', isViewOnce: true } };
+    assert.equal((await guard.handle(withheld)).reason, 'kind-allowed:viewonce');
+    assert.equal(sent.length, 0);
+});
+
+test('guard: an unflagged sender\'s one-time message is untouched', async () => {
+    const { guard, sent } = makeWorld();
+    const withheld = { key: { remoteJid: GROUP, participant: '923009999999@s.whatsapp.net', fromMe: false, id: 'VO3', isViewOnce: true } };
+    assert.equal(await guard.handle(withheld), null);
+    assert.equal(sent.length, 0);
+});
+
 test('guard: GUARD_MEDIA=sticker keeps photos allowed', async () => {
     const { guard, sent } = makeWorld({ guardMedia: 'sticker' });
     const viewOnceMsg = {
@@ -241,5 +305,86 @@ test('guard: learns the phone number of a LID-flagged member, so !unflag by numb
 test('guard: tolerates a malformed message object', async () => {
     const { guard, sent } = makeWorld();
     assert.doesNotThrow(async () => { await guard.handle({}); await guard.handle(null); });
+    assert.equal(sent.length, 0);
+});
+
+// ── raw-stanza sweep (the current wire shape) ────────────────────────────────
+// Baileys rc14 discards `<unavailable type="view_once_unavailable_fanout"/>`
+// messages before `messages.upsert`, so the guard must revoke them from the raw
+// `CB:message` stanza event, which fires first.
+const stanza = (over = {}) => ({
+    tag  : 'message',
+    attrs: { id: 'VOX1', from: GROUP, participant: USER, t: '1700000000' },
+    content: [{ tag: 'unavailable', attrs: { type: 'view_once_unavailable_fanout' } }],
+    ...over
+});
+
+const tick = () => new Promise((r) => setTimeout(r, 20));
+
+test('withheldViewOnceKey: extracts the revoke key from a withheld stanza', () => {
+    assert.deepEqual(withheldViewOnceKey(stanza()), { remoteJid: GROUP, participant: USER, id: 'VOX1' });
+});
+
+test('withheldViewOnceKey: ignores everything that is not a withheld one-time group message', () => {
+    assert.equal(withheldViewOnceKey(stanza({ content: [{ tag: 'enc', attrs: { type: 'pkmsg' } }] })), null);
+    assert.equal(withheldViewOnceKey(stanza({ content: [{ tag: 'unavailable', attrs: { type: 'bot_unavailable_fanout' } }] })), null);
+    assert.equal(withheldViewOnceKey(stanza({ attrs: { id: 'X', from: '923001234567@s.whatsapp.net', participant: USER } })), null, 'private chat');
+    assert.equal(withheldViewOnceKey({ tag: 'notification', attrs: {}, content: [] }), null);
+    assert.equal(withheldViewOnceKey(undefined), null);
+});
+
+test('sweep: revokes a flagged member\'s withheld one-time message from the raw stanza', async () => {
+    const { guard, sent } = makeWorld();
+    const ws = new EventEmitter();
+    guard.attach({ ws });
+
+    ws.emit('CB:message', stanza());
+    await tick();
+
+    assert.equal(sent.length, 1);
+    assert.deepEqual(sent[0].content.delete, { remoteJid: GROUP, participant: USER, id: 'VOX1', fromMe: false });
+    assert.equal(sent[0].jid, GROUP);
+    assert.equal(guard.stats.deleted, 1);
+    assert.equal(guard.stats.viewOnce, 1);
+});
+
+test('sweep: same message id is only revoked once (realtime + offline batch)', async () => {
+    const { guard, sent } = makeWorld();
+    const ws = new EventEmitter();
+    guard.attach({ ws });
+
+    ws.emit('CB:message', stanza());
+    // offline batch: the same stanza wrapped in a notification envelope
+    ws.emit('CB:notification', { tag: 'notification', attrs: { type: 'offline' }, content: [stanza()] });
+    await tick();
+
+    assert.equal(sent.length, 1, 'no double revoke');
+});
+
+test('sweep: leaves unflagged senders, whitelists and non-admin groups alone', async () => {
+    const unflagged = makeWorld();
+    unflagged.guard.attach({ ws: unflagged.ws = new EventEmitter() });
+    unflagged.ws.emit('CB:message', stanza({ attrs: { id: 'A', from: GROUP, participant: '923009999999@s.whatsapp.net' } }));
+
+    const wl = makeWorld({ whitelist: '923001234567' });
+    wl.guard.attach({ ws: wl.ws = new EventEmitter() });
+    wl.ws.emit('CB:message', stanza({ attrs: { id: 'B', from: GROUP, participant: USER } }));
+
+    const notAdmin = makeWorld({ admin: false });
+    notAdmin.guard.attach({ ws: notAdmin.ws = new EventEmitter() });
+    notAdmin.ws.emit('CB:message', stanza({ attrs: { id: 'C', from: GROUP, participant: USER } }));
+
+    await tick();
+    assert.equal(unflagged.sent.length, 0);
+    assert.equal(wl.sent.length, 0);
+    assert.equal(notAdmin.sent.length, 0);
+    assert.equal(notAdmin.guard.stats.skippedNotAdmin, 1);
+});
+
+test('sweep: attach is a no-op on sockets without a raw ws emitter', async () => {
+    const { guard, sent } = makeWorld();
+    assert.doesNotThrow(() => guard.attach({}));
+    assert.doesNotThrow(() => guard.attach(undefined));
+    await tick();
     assert.equal(sent.length, 0);
 });

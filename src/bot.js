@@ -28,6 +28,7 @@ import { createQuizHandler } from './quiz.js';
 import { createCommandHandler } from './commands.js';
 import { createRouter } from './router.js';
 import { createInstanceLock } from './lock.js';
+import { companionBrowser } from './config.js';
 import { createScoreStore } from './scores.js';
 import { createGameEngine } from './games.js';
 import { createRandomTools } from './random.js';
@@ -156,7 +157,11 @@ export async function startBot({
             auth                        : state,
             logger                      : log,
             printQRInTerminal           : false,
-            browser                     : Browsers.macOS('Desktop'),
+            // WA_BROWSER=android pairs as a phone-class companion, which is the
+            // only class WhatsApp ships one-time (view-once) media to. The web
+            // default keeps an existing pairing valid; the guard still revokes
+            // withheld one-time media blind, it just never sees the bytes.
+            browser                     : companionBrowser(config.companion, Browsers),
             // Speed + memory: skip the work a bot does not need.
             syncFullHistory             : false,
             markOnlineOnConnect         : false,
@@ -165,6 +170,11 @@ export async function startBot({
             emitOwnEvents               : false,
             getMessage                  : async () => undefined
         });
+
+        // Baileys drops the current withheld one-time shape before
+        // `messages.upsert` fires; the sweep listens to the raw stanza events
+        // this socket emits instead. Re-attached on every reconnect.
+        guard.attach(sock);
 
         // Events from a superseded socket are ignored (gen check): only the
         // live socket may persist creds, route messages or trigger reconnects.
@@ -206,6 +216,12 @@ export async function startBot({
                 log.raw(`  🎯  trigger  : "${config.quizTrigger}" + image`);
                 log.raw(`  🚩  flagged  : ${flags.count} member(s)`);
                 log.raw(`  🛡️  guard    : ${config.guardEnabled ? `ON (${config.guardMedia.join(', ')})` : 'OFF'}`);
+                log.raw(`  📲  companion: ${config.companion.label}`);
+                if (config.guardEnabled && !config.companion.receivesViewOnceMedia) {
+                    log.raw('     one-time (view-once) media is withheld by WhatsApp from web-class');
+                    log.raw('     devices — those are still revoked from the raw stanza; WA_BROWSER=android');
+                    log.raw('     (pair again) makes WhatsApp send the media too.');
+                }
                 log.raw(`  🎮  games    : ${games ? `ON (${config.gameTimeoutMs / 1000}s rounds, ${scores.playerCount} players on the board)` : 'OFF'}`);
                 log.raw(`  🧠  ai       : ${config.aiOrder.filter((p) => config[p]?.key).join(' → ')}`);
                 log.raw(`  💾  memory   : ${mem} MB RSS`);

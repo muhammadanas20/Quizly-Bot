@@ -51,7 +51,7 @@ answered before the next one starts — exactly the order you asked for.
 ## How the media guard works
 
 ```
-sticker or photo arrives (view-once photos are unwrapped as images)
+sticker or photo arrives (one-time media is recognised even when its bytes are withheld)
   └─ is the sender on the flag list?          ← one Set lookup, nothing else if not
        └─ is the media type blocked?          ← stickers + images by default; configurable
             └─ is the bot an admin here?      ← cached per group
@@ -70,6 +70,34 @@ sticker or photo arrives (view-once photos are unwrapped as images)
   Set `GUARD_MEDIA=all` to remove every supported media type; if your existing `.env`
   still says `GUARD_MEDIA=sticker`, change it to `sticker,image` to enable photo removal.
 
+### One-time (“view once”) media
+
+WhatsApp only ships one-time media to a **phone-class** linked device. A web-class one —
+which is what `Browsers.macOS('Desktop')` pairs as — receives only
+`<unavailable type="view_once_unavailable_fanout"/>` instead of the ciphertext. Worse,
+Baileys rc14 **throws that message away before `messages.upsert` fires**
+(`lib/Socket/messages-recv.js:1299-1312` acks and returns early), so a guard that only
+listens to `messages.upsert` never even learns the message existed — which is exactly why
+one-time media used to stay in the group.
+
+The guard therefore also listens one level lower, to the raw stanza events the socket
+emits *before* Baileys' drop logic (`CB:message`, plus offline `CB:notification`
+batches). When such a stanza names a flagged sender in a group where the bot is admin,
+it is revoked straight from the stanza's `from` / `participant` / `id` — a revoke needs
+only the key, never the media bytes. `!stats` counts them separately
+(`of which one-time media: n`).
+
+Two knobs:
+
+| Variable | Default | What it does |
+|---|---|---|
+| `WA_BROWSER` | `web` | `web` keeps your existing pairing; one-time media is still revoked via the raw-stanza sweep (above). `android` pairs as a phone-class companion so WhatsApp actually *sends* the one-time media — **you have to pair once more after switching** (use it if you also want quiz-solving on one-time photos). |
+| `WA_BROWSER_NAME` | `Quizly Bot` | The device name shown in *Linked devices* when paired as `android`. |
+
+A withheld one-time message cannot be a sticker or a document — WhatsApp only allows
+one-time photos, videos and voice notes — so any `GUARD_MEDIA` containing `image`,
+`video`, `gif` or `audio` (or `all`, or `viewonce`) covers it. `GUARD_MEDIA=sticker` on
+its own is an explicit stickers-only policy and leaves it alone.
 ---
 
 ## Games the whole group plays
@@ -139,6 +167,7 @@ GAME_MAX_ATTEMPTS=12
 ```
 
 ---
+
 
 ## Commands
 
@@ -319,15 +348,25 @@ Check it yourself on the VM: `pm2 monit` or `free -h`.
 | 9 | When the model's JSON did not parse, the raw JSON was posted into the group (`{"questions":[{"n":1,…`) — and it happened whenever the answer was cut off by the token limit, which is most long quizzes | Four-pass parser (strict JSON → repaired document → key/value pairs → numbered prose), a token ceiling that actually fits a long quiz, and a warning instead of a silent short answer |
 | 10 | `!flag` / `!unflag` typed from the bot's own account were silently dropped — the router returned `own` before the command handler ran, so the command did nothing at all and gave no feedback | Own-account commands are processed as owner commands, and every owner command answers with a reaction on the command message (🚩 / ✅ / ℹ️ / ⛔) |
 | 11 | A flag set from an `@mention` was stored under the LID only, while the same person's messages arrive by phone number — so the guard could miss them and `!unflag` by number reported "not flagged" | Every target is stored under **all** of its identities (phone number + LID), the guard aliases any new identity it sees onto the entry, and the label uses the member's name instead of a raw LID |
+| 12 | A flagged member's **one-time ("view once") media stayed in the group**. WhatsApp withholds one-time media from web-class linked devices (only `<unavailable type="view_once_unavailable_fanout"/>` arrives), and Baileys rc14 discards that stanza **before** `messages.upsert` fires (`messages-recv.js:1299-1312`), so an upsert-only guard never even saw the message. The old tests passed because they built view-once payloads *with* the media inside — a shape a web-class companion never receives. | A raw-stanza sweep (`CB:message` / offline `CB:notification`, emitted before Baileys' drop logic) revokes withheld one-time messages straight from the stanza key whenever the sender is flagged and the bot is admin. `isViewOnce()` additionally covers the legacy `view_once` shape and phone-class payloads (`viewonce` kind). `WA_BROWSER=android` optionally pairs as a phone-class companion so WhatsApp ships the media too |
 
 > **What I could not verify here.** This sandbox has no outbound internet, no WhatsApp
 > number and no API keys, so I could not complete a live login or a real Gemini/Grok call.
-> What *is* verified: 183 unit and integration tests over the guard, the router, the
+> What *is* verified: 221 unit and integration tests over the guard, the router, the
 > formatting, the provider request shapes and the fallback logic; a real process boot
 > (socket constructed, reconnect backoff, clean shutdown); and every request body asserted
 > against the documented API shapes. Two claims I made earlier about the old code were
 > wrong and are corrected above — `message_create` is not outgoing-only, and `msg.body` is
 > always a string in whatsapp-web.js (`src/structures/Message.js:55`), so it never threw.
+>
+> For the one-time media fix specifically: the shapes and the drop behaviour are read from
+> the installed `@whiskeysockets/baileys@7.0.0-rc14` itself — `messages-recv.js:1299-1312`
+> proves the `view_once_unavailable_fanout` stanza is acked and dropped before
+> `messages.upsert`, and `socket.js:446-465` proves the raw `CB:message` event fires before
+> that drop. The sweep is tested end-to-end through a real `startBot` boot against a fake
+> socket that emits exactly that stanza. What is **not** verified here is the live wire —
+> that requires your real pairing — so after updating, watch `pm2 logs quizly` for
+> `guard: swept withheld one-time message …` while a flagged member sends a one-time photo.
 
 ---
 

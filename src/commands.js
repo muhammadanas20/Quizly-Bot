@@ -102,7 +102,8 @@ export const HELP_TEXT = [
     '```',
     `${PREFIX}flag <@person> [why]   remove their stickers and photos (default)`,
     `${PREFIX}flag <@person> media=sticker,image`,
-    'View-once photos are included; configure GUARD_MEDIA for other media types.',
+    'One-time (view-once) media counts as media too and is removed, even when WhatsApp keeps the bytes from this device.',
+    'Configure GUARD_MEDIA for other media types.',
     `${PREFIX}unflag <@person>       remove a flag`,
     `${PREFIX}flags                  list flagged members`,
     `${PREFIX}guard on|off|status    toggle the media guard`,
@@ -197,6 +198,7 @@ export function createCommandHandler({ config, flags, log, guard, limiter, group
                         '*Bot stats*',
                         `Guard: ${config.guardEnabled ? 'ON' : 'OFF'} · media: ${config.guardMedia.join(', ')}`,
                         `Removed this session: ${guard.stats.deleted}` +
+                            (guard.stats.viewOnce ? ` · of which one-time media: ${guard.stats.viewOnce}` : '') +
                             (guard.stats.skippedNotAdmin ? ` · skipped (bot not admin): ${guard.stats.skippedNotAdmin}` : ''),
                         `Flagged members: ${flags.count}`,
                         `AI calls: ${rate.minute}/${rate.perMinute} this minute · ${rate.day}/${rate.perDay} today`,

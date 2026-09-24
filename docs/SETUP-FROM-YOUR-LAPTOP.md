@@ -241,6 +241,10 @@ When you see this, you're done:
   🎯  trigger  : "quiz" + image
   🚩  flagged  : 1 member(s)
   🛡️  guard    : ON (sticker, image)
+  📲  companion: web (Mac OS · Desktop)
+     one-time (view-once) media is withheld by WhatsApp from web-class
+     devices — those are still revoked from the raw stanza; WA_BROWSER=android
+     (pair again) makes WhatsApp send the media too.
   🧠  ai       : gemini → grok
   💾  memory   : 168 MB RSS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -289,8 +293,16 @@ on a 1 GiB VM that catches a leak before the kernel's OOM killer does.
    ```
    !flag @SomeMember test
    ```
-   Have that member send a sticker or photo (including a view-once photo). It should
-   vanish with **no message from the bot**. Then `!unflag @SomeMember`.
+   Have that member send a sticker or photo, then a **one-time ("view once") photo**.
+   All three should vanish with **no message from the bot**. Then `!unflag @SomeMember`.
+
+   > WhatsApp does not send one-time media to a web-class linked device — the bot only
+   > sees an "unavailable" marker and Baileys drops it before the normal message event.
+   > The bot listens one level lower (the raw stanza) and still revokes the message,
+   > because a revoke needs only the message key. `!stats` shows them under
+   > `of which one-time media`, and the log prints `guard: swept withheld one-time
+   > message …`. If you want the bot to actually receive the media (e.g. to quiz-solve
+   > one-time screenshots), set `WA_BROWSER=android` and pair again.
 5. Check it counted: `!stats`.
 
 ---
@@ -331,6 +343,7 @@ pm2 stop quizly && rm -rf ~/Quizly-Bot/auth && pm2 restart quizly
 | QR keeps refreshing, never scans | Camera can't read the small QR | Enlarge the terminal font, or use the pairing code (step 7) |
 | `WhatsApp logged this session out` | You removed the linked device, or WhatsApp revoked it | `rm -rf ~/Quizly-Bot/auth && pm2 restart quizly`, then re-scan |
 | Bot answers quizzes but **won't delete flagged media** | Not admin · guard off · not flagged · media type not blocked | `!guard status`, then check the bot is a group **admin**, the member is in `!flags`, and `GUARD_MEDIA` includes `sticker` or `image` as needed |
+| **One-time ("view once") media stays** in the group | Not admin · `GUARD_MEDIA=sticker` only (a deliberate stickers-only policy) · the member is not the one flagged | `!guard status`, check the bot is an **admin**, and that `GUARD_MEDIA` includes `image`. On a web-class pairing (`WA_BROWSER=web`) the bot never sees one-time bytes — that is normal; it revokes them from the raw stanza (watch `pm2 logs quizly` for `guard: swept withheld one-time message`) |
 | Bot deletes media but **says something** | It doesn't — by design it never replies to removed media | If you see a message, it came from another bot or the `!flag` confirmation |
 | `❌ Could not solve that quiz` + "API key rejected" | Bad/expired key | `npm run check` |
 | "model not found" | Provider retired the model id | `npm run check` shows valid ones; or rely on `*_MODEL_FALLBACKS` |

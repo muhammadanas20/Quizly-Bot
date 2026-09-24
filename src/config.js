@@ -70,8 +70,52 @@ export function idSet(...raws) {
 }
 
 // ─── Media kinds the guard can act on ────────────────────────────────────────
-export const GUARD_KINDS = ['sticker', 'image', 'video', 'gif', 'audio', 'document', 'link', 'all'];
+// 'viewonce' is a one-time message whose media WhatsApp withheld, so its real
+// type is unknowable; it is covered by any photo/video/audio rule anyway and
+// listed here so `GUARD_MEDIA=…viewonce` / `!flag x media=…viewonce` validate.
+export const GUARD_KINDS = ['sticker', 'image', 'video', 'gif', 'audio', 'document', 'link', 'viewonce', 'all'];
 export const DEFAULT_GUARD_MEDIA = Object.freeze(['sticker', 'image']);
+
+// ─── Companion (linked device) identity ──────────────────────────────────────
+/**
+ * WhatsApp decides who receives one-time media from the device class the bot
+ * pairs as. Baileys derives it from `config.browser[1]`: anything that is not
+ * "Android" is sent as `UserAgent.Platform.WEB` plus `webInfo`, i.e. a
+ * web-class companion — and those get `<unavailable type="view_once"/>`
+ * instead of the media.
+ *
+ *   web      default. Keeps an existing pairing working. One-time media is
+ *            withheld, but the guard still revokes it blind (it needs only
+ *            the message key).
+ *   android  paired as a phone-class companion, so WhatsApp ships one-time
+ *            media as well. Changes the device identity, so the session has
+ *            to be paired once more after switching.
+ */
+export const COMPANION_KINDS = Object.freeze({
+    web     : { kind: 'web',     label: 'web (Mac OS · Desktop)', receivesViewOnceMedia: false },
+    android : { kind: 'android', label: 'android (phone-class)',  receivesViewOnceMedia: true }
+});
+
+/** @returns {{kind:string,label:string,receivesViewOnceMedia:boolean,name:string}} */
+export function parseCompanion(raw, name) {
+    const kind = String(raw || '').trim().toLowerCase();
+    const picked = COMPANION_KINDS[kind] || COMPANION_KINDS.web;
+    return { ...picked, name: String(name || '').trim() || 'Quizly Bot' };
+}
+
+/**
+ * The Baileys `browser` tuple for a companion identity.
+ *
+ * Baileys keys the device class off `browser[1]`: `Browsers.android(name)` puts
+ * 'Android' there (→ `UserAgent.Platform.ANDROID`, no `webInfo`, i.e. phone
+ * class), everything else becomes `Platform.WEB`. `Browsers` is injected so
+ * this stays free of a Baileys import in the config layer.
+ */
+export function companionBrowser(companion, Browsers) {
+    return companion?.kind === 'android'
+        ? Browsers.android(companion.name || 'Quizly Bot')
+        : Browsers.macOS('Desktop');
+}
 
 // ─── Main loader ─────────────────────────────────────────────────────────────
 export function loadConfig(env = process.env) {
@@ -122,6 +166,9 @@ export function loadConfig(env = process.env) {
         guardMedia      : normaliseGuardMedia(env.GUARD_MEDIA),
         guardWhitelist  : list(env.GUARD_WHITELIST).map(normalizeId).filter(Boolean),
         seededFlags     : parseSeedFlags(env.FLAGGED_USERS),
+
+        // Linked-device identity — decides whether WhatsApp sends one-time media
+        companion       : parseCompanion(env.WA_BROWSER, env.WA_BROWSER_NAME),
 
         // Games (!game, !guess, !top, …)
         gamesEnabled    : bool(env.GAMES, true),
@@ -179,6 +226,14 @@ export function validateConfig(cfg) {
     }
     if (!cfg.phoneNumber) {
         warnings.push('PHONE_NUMBER is empty — you will log in by scanning a QR code.');
+    }
+    if (cfg.guardEnabled && cfg.companion && !cfg.companion.receivesViewOnceMedia) {
+        warnings.push(
+            'WA_BROWSER is web-class: WhatsApp withholds one-time (view-once) media from ' +
+            'web-class linked devices; the guard still revokes those from the raw message ' +
+            'stanza (a revoke only needs the key). Set WA_BROWSER=android and pair once more ' +
+            'to also receive the media itself.'
+        );
     }
     return { ok: errors.length === 0, errors, warnings, usableProviders: usable };
 }
