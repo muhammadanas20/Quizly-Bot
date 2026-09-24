@@ -71,6 +71,7 @@ export function idSet(...raws) {
 
 // ─── Media kinds the guard can act on ────────────────────────────────────────
 export const GUARD_KINDS = ['sticker', 'image', 'video', 'gif', 'audio', 'document', 'link', 'all'];
+export const DEFAULT_GUARD_MEDIA = Object.freeze(['sticker', 'image']);
 
 // ─── Main loader ─────────────────────────────────────────────────────────────
 export function loadConfig(env = process.env) {
@@ -138,7 +139,7 @@ export function loadConfig(env = process.env) {
 function normaliseGuardMedia(raw) {
     const picked = list(raw).map((s) => s.toLowerCase());
     const valid = picked.filter((k) => GUARD_KINDS.includes(k));
-    return valid.length ? valid : ['sticker'];
+    return valid.length ? valid : [...DEFAULT_GUARD_MEDIA];
 }
 
 /** "923001234567:Ali,923009876543" → [{ ids:Set, label:'Ali' }, ...] */

@@ -1,26 +1,24 @@
 /**
- * src/guard.js — silent sticker/media removal for flagged members.
+ * src/guard.js — silent media removal for flagged members.
  *
- * Behaviour (this is the whole point of the feature):
- *   • a flagged member sends a sticker in a group where the bot is admin
- *   • the sticker is revoked for everyone, immediately
- *   • the bot says NOTHING. No warning, no reply, no message into the group.
- *     The only trace is one debug line in the server console plus a counter
- *     you can read with !stats.
+ * By default, a flagged member's stickers and photos (including view-once
+ * photos) are revoked in groups where the bot is an admin. The bot says
+ * NOTHING: no warning, reply, or replacement media. The only trace is one
+ * debug line in the server console plus a counter you can read with !stats.
  *
  * The decision is a pure function (decide) so it can be unit-tested without a
  * live WhatsApp socket.
  */
 
 import { classifyKind, identitiesOf } from './message.js';
-import { normalizeId } from './config.js';
+import { DEFAULT_GUARD_MEDIA } from './config.js';
 
 const NOTHING_TO_DELETE = new Set(['system', 'reaction', 'unknown']);
 
 /**
  * Pure decision. `botIsAdmin` may be true | false | 'unknown'.
- * 'unknown' still attempts the delete, so the very first sticker in a group is
- * not missed while the group-metadata cache is warming up.
+ * 'unknown' still attempts the delete, so the first blocked media in a group
+ * is not missed while the group-metadata cache is warming up.
  */
 export function decide({
     kind,
@@ -29,7 +27,7 @@ export function decide({
     isGroup,
     fromMe,
     whitelist = new Set(),
-    blocked = ['sticker'],
+    blocked = DEFAULT_GUARD_MEDIA,
     flags,
     botIsAdmin
 }) {

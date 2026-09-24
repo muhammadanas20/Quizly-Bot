@@ -8,7 +8,7 @@
  * Each entry can hold several identities for the same human (phone-number JID
  * and/or LID JID) because Baileys 7 may address the same person either way.
  *
- * Writes are debounced: on a 1 GiB VM we do not want a disk write per sticker.
+ * Writes are debounced: on a 1 GiB VM we do not want a disk write per removal.
  */
 
 import fs from 'node:fs';

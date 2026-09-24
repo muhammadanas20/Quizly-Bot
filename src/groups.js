@@ -1,13 +1,13 @@
 /**
  * src/groups.js — cached group metadata.
  *
- * The sticker guard has to know "am I an admin here?" for every single message
+ * The media guard has to know "am I an admin here?" for every single message
  * it inspects. Asking WhatsApp each time would add a round trip to the hot path,
  * so the answer is cached per group and invalidated when membership changes.
  *
  * isAdmin() resolves to true | false | 'unknown'. 'unknown' means "we could not
  * find out" and the guard treats it as go-ahead, so a cold cache never lets a
- * sticker slip through.
+ * blocked media slip through.
  */
 
 import { normalizeId } from './config.js';
