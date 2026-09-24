@@ -180,10 +180,29 @@ test('router: a flagged member\'s sticker is deleted with no message sent', asyn
 
     const res = await router.processMessage(sticker());
 
-    assert.equal(res.nothing, true, 'the sticker is not a quiz and not a command');
+    assert.deepEqual(res, { guarded: true }, 'the revoked media is not routed further');
     assert.equal(deletes().length, 1, 'exactly one revoke');
     assert.equal(texts().length, 0, 'the bot must not say anything');
     assert.equal(sent[0].content.delete.id, 'M1');
+});
+
+test('router: flagged photos, including view-once, are revoked before quiz processing', async () => {
+    const { router, flags, sent, texts, deletes } = world();
+    flags.add(new Set(['923009876543']), { label: 'Spammer' });
+
+    const normalPhoto = msg({
+        key: { remoteJid: GROUP, participant: TARGET, fromMe: false, id: 'IMG1' },
+        message: { imageMessage: { url: 'u', mimetype: 'image/jpeg', caption: 'quiz please' } }
+    });
+    const viewOncePhoto = msg({
+        key: { remoteJid: GROUP, participant: TARGET, fromMe: false, id: 'IMG2' },
+        message: { viewOnceMessageV2: { message: { imageMessage: { url: 'u', mimetype: 'image/jpeg', caption: 'quiz please' } } } }
+    });
+
+    assert.deepEqual(await router.processMessage(normalPhoto), { guarded: true });
+    assert.deepEqual(await router.processMessage(viewOncePhoto), { guarded: true });
+    assert.deepEqual(deletes().map((s) => s.content.delete.id), ['IMG1', 'IMG2']);
+    assert.equal(texts().length, 0, 'deleted photos are never sent to the quiz solver or posted');
 });
 
 test('router: the guard runs even for a sender who is not the owner', async () => {
@@ -198,6 +217,19 @@ test('router: without admin rights the sticker survives and the bot stays quiet'
     flags.add(new Set(['923009876543']));
     await router.processMessage(sticker());
     assert.equal(sent.length, 0);
+});
+
+test('router: blocked photos are not sent to the quiz solver when the bot is not admin', async () => {
+    const { router, flags, sent, texts } = world({ botIsAdmin: false });
+    flags.add(new Set(['923009876543']));
+
+    const res = await router.processMessage(msg({
+        message: { viewOnceMessageV2: { message: { imageMessage: { url: 'u', caption: 'quiz please' } } } }
+    }));
+
+    assert.deepEqual(res, { guarded: true });
+    assert.equal(sent.length, 0, 'the bot cannot revoke without admin rights');
+    assert.equal(texts().length, 0, 'blocked media still must not reach the quiz solver');
 });
 
 test('router: GUARD_WHITELIST protects a number even when it is flagged', async () => {

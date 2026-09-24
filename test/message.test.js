@@ -30,6 +30,8 @@ test('classifyKind: recognises every media type', () => {
 
 test('classifyKind: sees through viewOnce / ephemeral envelopes', () => {
     assert.equal(classifyKind({ viewOnceMessage: { message: sticker } }), 'sticker');
+    assert.equal(classifyKind({ viewOnceMessageV2: { message: image } }), 'image');
+    assert.equal(classifyKind({ viewOnceMessageV2Extension: { message: image } }), 'image');
     assert.equal(classifyKind({ ephemeralMessage: { message: { viewOnceMessageV2: { message: image } } } }), 'image');
 });
 

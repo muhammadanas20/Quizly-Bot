@@ -240,7 +240,7 @@ When you see this, you're done:
   📞  number   : 923xxxxxxxxx@s.whatsapp.net
   🎯  trigger  : "quiz" + image
   🚩  flagged  : 1 member(s)
-  🛡️  guard    : ON (sticker)
+  🛡️  guard    : ON (sticker, image)
   🧠  ai       : gemini → grok
   💾  memory   : 168 MB RSS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -289,8 +289,8 @@ on a 1 GiB VM that catches a leak before the kernel's OOM killer does.
    ```
    !flag @SomeMember test
    ```
-   Have that member send a sticker. It should vanish with **no message from the bot**.
-   Then `!unflag @SomeMember`.
+   Have that member send a sticker or photo (including a view-once photo). It should
+   vanish with **no message from the bot**. Then `!unflag @SomeMember`.
 5. Check it counted: `!stats`.
 
 ---
@@ -330,8 +330,8 @@ pm2 stop quizly && rm -rf ~/Quizly-Bot/auth && pm2 restart quizly
 | No QR appears, "connection errored" repeats | The VM cannot reach WhatsApp | `curl -I https://web.whatsapp.com` — if it fails, check the NSG **outbound** rules and DNS |
 | QR keeps refreshing, never scans | Camera can't read the small QR | Enlarge the terminal font, or use the pairing code (step 7) |
 | `WhatsApp logged this session out` | You removed the linked device, or WhatsApp revoked it | `rm -rf ~/Quizly-Bot/auth && pm2 restart quizly`, then re-scan |
-| Bot answers quizzes but **won't delete stickers** | Not admin · guard off · not flagged · media type not blocked | `!guard status`, then check the bot is a group **admin**, the member is in `!flags`, and `GUARD_MEDIA` includes `sticker` |
-| Bot deletes stickers but **says something** | It doesn't — by design it never replies | If you see a message, it came from another bot or the `!flag` confirmation |
+| Bot answers quizzes but **won't delete flagged media** | Not admin · guard off · not flagged · media type not blocked | `!guard status`, then check the bot is a group **admin**, the member is in `!flags`, and `GUARD_MEDIA` includes `sticker` or `image` as needed |
+| Bot deletes media but **says something** | It doesn't — by design it never replies to removed media | If you see a message, it came from another bot or the `!flag` confirmation |
 | `❌ Could not solve that quiz` + "API key rejected" | Bad/expired key | `npm run check` |
 | "model not found" | Provider retired the model id | `npm run check` shows valid ones; or rely on `*_MODEL_FALLBACKS` |
 | Very slow answers | Large image, or a reasoning model | Set `XAI_REASONING_EFFORT=low`, `GEMINI_THINKING_BUDGET=0`, and optionally `npm i sharp` so big screenshots get downscaled |

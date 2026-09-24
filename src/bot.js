@@ -2,7 +2,7 @@
  * src/bot.js — socket lifecycle + message routing.
  *
  * Order of work for every incoming message matters:
- *   1. sticker guard  (fastest possible path — one Set lookup for non-flagged)
+ *   1. media guard    (fastest possible path — one Set lookup for non-flagged)
  *   2. commands       (!flag, !help, …)
  *   3. quiz trigger
  *
@@ -238,7 +238,7 @@ export async function startBot({
             if (gen !== generation || type !== 'notify') return;
             for (const msg of messages) {
                 // Deliberately not awaited: a slow quiz must not delay the next
-                // message, and above all must not delay the sticker guard.
+                // message, and above all must not delay the media guard.
                 router.processMessage(msg).catch((err) => log.error(`message handler: ${err.message}`));
             }
         });

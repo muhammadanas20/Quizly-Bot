@@ -4,9 +4,9 @@ A WhatsApp bot that does two jobs, built to run on a **1 GiB RAM** VM:
 
 1. **Quiz solver** — send `quiz` + a screenshot, get every question answered in order:
    *question → one-line reason → answer*, then a compact answer key.
-2. **Silent sticker guard** — a member you flag has their stickers removed the instant
-   they post them, in any group where the bot is admin. **The bot never replies, never
-   warns, never posts anything.** The sticker just disappears.
+2. **Silent media guard** — a member you flag has their stickers and photos removed
+   the instant they post them, including view-once photos, in any group where the bot is
+   admin. **The bot never warns or sends replacement media.** The flagged media just disappears.
 
 ---
 
@@ -46,12 +46,12 @@ answered before the next one starts — exactly the order you asked for.
 
 ---
 
-## How the sticker guard works
+## How the media guard works
 
 ```
-sticker arrives
+sticker or photo arrives (view-once photos are unwrapped as images)
   └─ is the sender on the flag list?          ← one Set lookup, nothing else if not
-       └─ is the media type blocked?          ← sticker by default, configurable
+       └─ is the media type blocked?          ← stickers + images by default; configurable
             └─ is the bot an admin here?      ← cached per group
                  └─ revoke the message        ← sock.sendMessage(jid, { delete: key })
                     …and say nothing.
@@ -64,16 +64,19 @@ sticker arrives
   silently miss half the members in a big group).
 * Nothing is deleted in a group where the bot is **not** an admin — WhatsApp would
   reject the revoke anyway.
+* The default `GUARD_MEDIA=sticker,image` removes stickers and ordinary/view-once photos.
+  Set `GUARD_MEDIA=all` to remove every supported media type; if your existing `.env`
+  still says `GUARD_MEDIA=sticker`, change it to `sticker,image` to enable photo removal.
 
 ## Commands
 
 | Command | Who | What |
 |---|---|---|
 | `!quiz` | anyone | solve the attached / replied image right now |
-| `!flag <@person or number> [reason]` | owner | flag a member |
+| `!flag <@person or number> [reason]` | owner | flag a member; stickers and photos (including view-once) are removed by default |
 | `!unflag <@person or number>` | owner | remove a flag |
 | `!flags` | owner | list flagged members + how much was removed |
-| `!guard on\|off\|status` | owner | toggle the guard live |
+| `!guard on\|off\|status` | owner | toggle the media guard live |
 | `!stats` | anyone | deletions, AI usage, memory, uptime |
 | `!ping` | anyone | latency + memory |
 
@@ -250,7 +253,7 @@ src/
   log.js                  tiny pino-compatible logger
   bot.js                  Baileys socket, connection, reconnect
   router.js               guard → commands → quiz, in that order
-  guard.js                silent sticker removal (pure decision + live executor)
+  guard.js                silent flagged-media removal (pure decision + live executor)
   flags.js                flagged-member store, persisted to data/flags.json
   groups.js               cached group metadata / "am I admin?"
   quiz.js                 trigger → download → AI → format → send

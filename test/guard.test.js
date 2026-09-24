@@ -21,7 +21,7 @@ const base = (over = {}) => ({
     isGroup     : true,
     fromMe      : false,
     whitelist   : new Set(),
-    blocked     : ['sticker'],
+    blocked     : ['sticker', 'image'],
     flags       : { find: (ids) => ({ key: '923001234567', entry: { keys: [...ids], label: 'Ali', media: null } }) },
     botIsAdmin  : true,
     ...over
@@ -67,7 +67,7 @@ test('decide: whitelisted number is never touched', () => {
 });
 
 test('decide: only the configured media kinds are removed', () => {
-    assert.equal(decide(base({ kind: 'image' })).reason, 'kind-allowed:image');
+    assert.equal(decide(base({ kind: 'image', blocked: ['sticker'] })).reason, 'kind-allowed:image');
     assert.equal(decide(base({ kind: 'image', blocked: ['sticker', 'image'] })).act, 'delete');
     assert.equal(decide(base({ kind: 'link', blocked: ['all'] })).act, 'delete');
 });
@@ -105,7 +105,7 @@ test('collectSenderIds: survives a missing or throwing mapping store', () => {
 });
 
 // ── the live guard ───────────────────────────────────────────────────────────
-function makeWorld({ guardMedia = 'sticker', flagged = true, admin = true, whitelist = '' } = {}) {
+function makeWorld({ guardMedia, flagged = true, admin = true, whitelist = '' } = {}) {
     const sent = [];
     const flags = store();
     if (flagged) flags.add(new Set(['923001234567']), { label: 'Ali' });
@@ -167,18 +167,36 @@ test('guard: does nothing when the bot is not an admin, and counts it', async ()
     assert.equal(guard.stats.skippedNotAdmin, 1);
 });
 
-test('guard: only stickers by default; images pass through', async () => {
+test('guard: photos, including view-once photos, are deleted by default', async () => {
     const { guard, sent } = makeWorld();
-    const imageMsg = { key: stickerMsg.key, message: { imageMessage: { url: 'u', mimetype: 'image/jpeg' } } };
-    const verdict = await guard.handle(imageMsg);
-    assert.equal(verdict.act, 'skip');
+    const imageMsg = {
+        key: { ...stickerMsg.key, id: 'IMG1' },
+        message: { imageMessage: { url: 'u', mimetype: 'image/jpeg' } }
+    };
+    const viewOnceMsg = {
+        key: { ...stickerMsg.key, id: 'IMG2' },
+        message: { viewOnceMessageV2: { message: { imageMessage: { url: 'u', mimetype: 'image/jpeg' } } } }
+    };
+
+    assert.equal((await guard.handle(imageMsg)).act, 'delete');
+    assert.equal((await guard.handle(viewOnceMsg)).act, 'delete');
+    assert.deepEqual(sent.map((s) => s.content.delete.id), ['IMG1', 'IMG2']);
+});
+
+test('guard: GUARD_MEDIA=sticker keeps photos allowed', async () => {
+    const { guard, sent } = makeWorld({ guardMedia: 'sticker' });
+    const viewOnceMsg = {
+        key: stickerMsg.key,
+        message: { viewOnceMessageV2: { message: { imageMessage: { url: 'u', mimetype: 'image/jpeg' } } } }
+    };
+    assert.equal((await guard.handle(viewOnceMsg)).reason, 'kind-allowed:image');
     assert.equal(sent.length, 0);
 });
 
-test('guard: GUARD_MEDIA=all removes images too', async () => {
+test('guard: GUARD_MEDIA=all removes videos too', async () => {
     const { guard, sent } = makeWorld({ guardMedia: 'all' });
-    const imageMsg = { key: stickerMsg.key, message: { imageMessage: { url: 'u', mimetype: 'image/jpeg' } } };
-    assert.equal((await guard.handle(imageMsg)).act, 'delete');
+    const videoMsg = { key: stickerMsg.key, message: { videoMessage: { url: 'u' } } };
+    assert.equal((await guard.handle(videoMsg)).act, 'delete');
     assert.equal(sent.length, 1);
 });
 

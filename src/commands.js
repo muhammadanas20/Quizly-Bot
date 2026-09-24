@@ -58,16 +58,17 @@ export const HELP_TEXT = [
     '*Commands*',
     '```',
     `${PREFIX}quiz                 solve the attached / replied image now`,
-    `${PREFIX}flag <@person> [why]   flag a member (their stickers get removed)`,
-    `${PREFIX}flag <@person> media=sticker,link`,
+    `${PREFIX}flag <@person> [why]   remove their stickers and photos (default)`,
+    `${PREFIX}flag <@person> media=sticker,image`,
+    'View-once photos are included; configure GUARD_MEDIA for other media types.',
     `${PREFIX}unflag <@person>       remove a flag`,
     `${PREFIX}flags                  list flagged members`,
-    `${PREFIX}guard on|off|status    toggle the sticker guard`,
+    `${PREFIX}guard on|off|status    toggle the media guard`,
     `${PREFIX}stats                  deletes, AI usage, memory`,
     `${PREFIX}ping                   latency check`,
     '```',
     '',
-    'The guard never replies in the group — flagged stickers just disappear.'
+    'The guard never replies in the group — flagged stickers and photos just disappear.'
 ].join('\n');
 
 export function createCommandHandler({ config, flags, log, guard, limiter, groups, solveNow, startedAt }) {
@@ -189,7 +190,7 @@ export function createCommandHandler({ config, flags, log, guard, limiter, group
                 if (!targets.length) {
                     return { handled: true, react: '⚠️', reply: `Usage: ${PREFIX}flag <@person or number> [reason]` };
                 }
-                // "media=sticker,link" overrides the global GUARD_MEDIA for this person
+                // "media=sticker,image" overrides the global GUARD_MEDIA for this person
                 const mediaArg = cmd.args.find((a) => /^media=/i.test(a));
                 const media = mediaArg
                     ? mediaArg.slice(6).split(',').map((k) => k.trim().toLowerCase()).filter((k) => GUARD_KINDS.includes(k))

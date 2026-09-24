@@ -2,7 +2,7 @@
  * src/router.js — decides what to do with one incoming message.
  *
  * Order matters:
- *   1. sticker guard  — must run first and must be cheap; this is the feature
+ *   1. media guard    — must run first and must be cheap; this is the feature
  *                       that has to feel instant
  *   2. commands       — owner control surface
  *   3. quiz trigger   — the expensive path, only reached when asked for
@@ -33,11 +33,21 @@ export function createRouter({ sock, config, log, flags, guard, groups, quiz, co
         const isGroup = isGroupJid(jid);
         const fromMe  = Boolean(msg?.key?.fromMe);
 
-        // 1. guard — silent, instant, and the cheapest possible check first
+        // 1. guard — silent, instant, and the cheapest possible check first.
+        // Once media has been revoked, do not hand it to the quiz solver or
+        // process a caption/command attached to the deleted message.
         try {
-            await guard.handle(msg);
+            const verdict = await guard.handle(msg);
+            // Don't process media that should have been removed when the bot
+            // lacks admin rights; it would otherwise reach the quiz solver.
+            if (verdict?.act === 'delete' || verdict?.reason === 'bot-not-admin') {
+                return { guarded: true };
+            }
         } catch (err) {
             log.warn(`guard error: ${err.message}`);
+            // Fail closed: a guard failure on a flagged sender must not forward
+            // that message's media to the quiz solver or another command path.
+            return { guarded: true, guardError: true };
         }
 
         const text = extractText(msg.message);

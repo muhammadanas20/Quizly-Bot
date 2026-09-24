@@ -44,7 +44,9 @@ export function extractText(message) {
 }
 
 /**
- * Coarse media kind of a message. This is what the sticker guard matches on.
+ * Coarse media kind of a message. View-once/ephemeral wrappers are peeled by
+ * unwrap(), so a one-time photo is classified as an ordinary 'image' and is
+ * covered by the guard's image policy.
  * @returns {'sticker'|'image'|'video'|'gif'|'audio'|'document'|'link'|'text'|
  *          'location'|'contact'|'poll'|'reaction'|'system'|'unknown'}
  */
@@ -121,7 +123,7 @@ export function bareJid(jid) {
  * one you get depends on the group: a mention in `contextInfo.mentionedJid` is
  * usually a LID, while `key.participant` is usually the phone number. A flag
  * stored under one and looked up under the other silently misses — which is
- * how "!flag worked but the sticker stayed" and "!unflag says not flagged"
+ * how "!flag worked but the blocked media stayed" and "!unflag says not flagged"
  * happen. The socket's lid-mapping store translates when it can; `sock` is
  * optional so this stays pure in tests.
  *

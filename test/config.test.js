@@ -33,7 +33,7 @@ test('normalizeId: junk becomes an empty string, never a match', () => {
 test('loadConfig: defaults are sane with an empty environment', () => {
     const cfg = loadConfig({});
     assert.equal(cfg.quizTrigger, 'quiz');
-    assert.deepEqual(cfg.guardMedia, ['sticker']);
+    assert.deepEqual(cfg.guardMedia, ['sticker', 'image']);
     assert.equal(cfg.guardEnabled, true);
     assert.equal(cfg.ackMode, 'react');
     assert.deepEqual(cfg.aiOrder, ['groq', 'gemini', 'grok']);
@@ -48,8 +48,8 @@ test('loadConfig: GROK_API_KEY is accepted as an alias for XAI_API_KEY', () => {
     assert.equal(cfg.grok.key, 'xai-key-123');
 });
 
-test('loadConfig: invalid GUARD_MEDIA falls back to sticker, valid list is kept', () => {
-    assert.deepEqual(loadConfig({ GUARD_MEDIA: 'nonsense' }).guardMedia, ['sticker']);
+test('loadConfig: invalid GUARD_MEDIA falls back to stickers and photos, valid list is kept', () => {
+    assert.deepEqual(loadConfig({ GUARD_MEDIA: 'nonsense' }).guardMedia, ['sticker', 'image']);
     assert.deepEqual(loadConfig({ GUARD_MEDIA: 'sticker, link, ALL' }).guardMedia, ['sticker', 'link', 'all']);
 });
 

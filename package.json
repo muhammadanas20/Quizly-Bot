@@ -1,7 +1,7 @@
 {
   "name": "quizly-bot",
   "version": "2.0.0",
-  "description": "WhatsApp quiz solver + silent sticker guard for flagged members. Built for a 1 GB RAM VM (no Chromium).",
+  "description": "WhatsApp quiz solver + silent sticker/photo guard for flagged members. Built for a 1 GB RAM VM (no Chromium).",
   "type": "module",
   "main": "index.js",
   "scripts": {
