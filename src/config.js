@@ -221,8 +221,9 @@ export function validateConfig(cfg) {
     if (cfg.guardEnabled && cfg.companion && !cfg.companion.receivesViewOnceMedia) {
         warnings.push(
             'WA_BROWSER is web-class: WhatsApp withholds one-time (view-once) media from ' +
-            'web-class linked devices, so the guard revokes those blind (it only needs the ' +
-            'message key). Set WA_BROWSER=android and pair once more to also receive the media.'
+            'web-class linked devices; the guard still revokes those from the raw message ' +
+            'stanza (a revoke only needs the key). Set WA_BROWSER=android and pair once more ' +
+            'to also receive the media itself.'
         );
     }
     return { ok: errors.length === 0, errors, warnings, usableProviders: usable };

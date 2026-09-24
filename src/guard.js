@@ -7,9 +7,13 @@
  * debug line in the server console plus a counter you can read with !stats.
  *
  * One-time ("view once") media is the awkward case: WhatsApp only ships it to
- * phone-class linked devices, so a web-class companion receives the message
- * with the media withheld and no message body at all — just `key.isViewOnce`.
- * The revoke needs only the key, so those are removed too, blind.
+ * phone-class linked devices. A web-class companion receives just an
+ * `<unavailable type="view_once…"/>` marker, and for the current
+ * `view_once_unavailable_fanout` type Baileys rc14 discards the message BEFORE
+ * `messages.upsert` — so `handle()` alone would never see it. `attach()` adds a
+ * sweep on the raw `CB:message` / `CB:notification` stanza events (emitted
+ * before that drop logic) and revokes straight from the stanza key; a revoke
+ * needs only the key, never the media bytes.
  *
  * The decision is a pure function (decide) so it can be unit-tested without a
  * live WhatsApp socket.
@@ -32,6 +36,31 @@ const VIEW_ONCE_COVERS = ['image', 'video', 'gif', 'audio'];
 /** Does this rule cover a one-time message whose media we were not shown? */
 export function ruleCoversViewOnce(rule = []) {
     return rule.includes('all') || rule.includes('viewonce') || rule.some((k) => VIEW_ONCE_COVERS.includes(k));
+}
+
+/**
+ * Unavailable-stanza types for which Baileys rc14 DROPS the message before
+ * `messages.upsert` fires (lib/Socket/messages-recv.js:1299-1312 acks and
+ * returns early). For these the ONLY observation point left is the raw
+ * `CB:message` stanza event, which the socket emits before any of that.
+ */
+export const WITHHELD_VIEW_ONCE_TYPES = ['view_once_unavailable_fanout'];
+
+/**
+ * If this raw incoming stanza is a withheld one-time message in a group,
+ * return just enough to revoke it (`{ remoteJid, participant, id }`).
+ * Pure and defensive: stanzas are untrusted wire data.
+ */
+export function withheldViewOnceKey(node) {
+    if (node?.tag !== 'message') return null;
+    const content = Array.isArray(node.content) ? node.content : [];
+    const unavailable = content.find((c) => c && typeof c === 'object' && c.tag === 'unavailable');
+    const type = String(unavailable?.attrs?.type || '');
+    if (!WITHHELD_VIEW_ONCE_TYPES.includes(type)) return null;
+
+    const a = node.attrs || {};
+    if (!a.id || !a.from || !String(a.from).endsWith('@g.us')) return null;   // groups only, like the guard
+    return { remoteJid: a.from, participant: a.participant, id: a.id };
 }
 
 /**
@@ -102,6 +131,10 @@ export function createGuard({ sock, flags, config, log, isAdmin }) {
     async function handle(msg) {
         if (!msg?.key) return null;
 
+        // Already revoked by the raw-stanza sweep (or about to be): do not send
+        // a second revoke, and keep the router from processing this message.
+        if (swept.has(msg.key.id)) return { act: 'delete', reason: 'swept-from-stanza' };
+
         // Cheapest possible pre-check: for the ~99% of messages sent by people
         // who are not flagged this costs one Set lookup and nothing else.
         const senderIds = collectSenderIds(msg, sock);
@@ -109,8 +142,10 @@ export function createGuard({ sock, flags, config, log, isAdmin }) {
 
         const jid     = msg.key.remoteJid;
         const sender  = msg.key.participant || jid;
-        // `msg.key` matters: a one-time message a web-class companion is not
-        // allowed to see arrives with NO message body, only `key.isViewOnce`.
+        // `msg.key` matters: a legacy withheld one-time message (`<unavailable
+        // type="view_once">`) arrives with NO body, only `key.isViewOnce`. The
+        // current `view_once_unavailable_fanout` type never reaches handle() —
+        // see sweepStanza/attach below.
         const kind    = classifyKind(msg.message, msg.key);
         const admin   = await Promise.resolve(isAdmin(jid));
 
@@ -150,14 +185,73 @@ export function createGuard({ sock, flags, config, log, isAdmin }) {
         stats.byUser.set(label, (stats.byUser.get(label) || 0) + 1);
 
         // A revoked one-time message is revoked blind: WhatsApp keeps the media
-        // from web-class linked devices, so all we ever get is `key.isViewOnce`.
-        // The revoke only needs the key, so the removal still works.
+        // from web-class linked devices, so all we ever get is the key. The
+        // revoke only needs the key, so the removal still works.
         const blind = kind === 'viewonce' ? ' — one-time media, withheld by WhatsApp' : '';
         log.debug(`guard: removed ${kind} from ${label} in ${jid} (${Date.now() - started}ms, ${total} total)${blind}`);
         return verdict;
     }
 
-    return { handle, stats };
+    // ── raw-stanza sweep for withheld one-time media ─────────────────────────
+    // Baileys rc14 throws the current wire shape (`<unavailable
+    // type="view_once_unavailable_fanout"/>`) away BEFORE `messages.upsert`
+    // fires, so `handle()` never sees it. The socket, however, emits a raw
+    // `CB:message` / `CB:notification` event for the stanza first (socket.js),
+    // and the revoke needs only from/participant/id — all plain stanza attrs.
+    const swept = new Set();
+
+    function sweepStanza(node) {
+        const key = withheldViewOnceKey(node);
+        if (!key || swept.has(key.id)) return;
+        swept.add(key.id);
+        if (swept.size > 2000) swept.clear();
+
+        const senderIds = new Set(identitiesOf(key.participant, sock));
+        Promise.resolve(isAdmin(key.remoteJid))
+            .then((admin) => decide({
+                kind         : 'viewonce',
+                senderIds,
+                guardEnabled : config.guardEnabled,
+                isGroup      : true,
+                fromMe       : false,
+                whitelist,
+                blocked      : config.guardMedia,
+                flags,
+                botIsAdmin   : admin
+            }))
+            .then(async (verdict) => {
+                if (verdict.act !== 'delete') {
+                    if (verdict.reason === 'bot-not-admin') stats.skippedNotAdmin++;
+                    return;
+                }
+                await sock.sendMessage(key.remoteJid, {
+                    delete: { remoteJid: key.remoteJid, participant: key.participant, id: key.id, fromMe: false }
+                });
+                const label = verdict.entry?.label || key.participant;
+                const total = flags.bumpDeleted(senderIds);
+                stats.deleted++;
+                stats.viewOnce++;
+                stats.lastAt = new Date().toISOString();
+                stats.byUser.set(label, (stats.byUser.get(label) || 0) + 1);
+                log.debug(`guard: swept withheld one-time message from ${label} in ${key.remoteJid} (${total} total)`);
+            })
+            .catch((err) => log.debug(`view-once sweep: ${err.message}`));
+    }
+
+    /** Wire the sweep into one socket. Re-call for every new socket. */
+    function attach(socket) {
+        const ws = socket?.ws;
+        if (!ws?.on) return;
+        ws.on('CB:message', sweepStanza);
+        // Offline batches arrive wrapped: sweep the message children too.
+        ws.on('CB:notification', (node) => {
+            for (const child of Array.isArray(node?.content) ? node.content : []) {
+                if (child && typeof child === 'object' && child.tag === 'message') sweepStanza(child);
+            }
+        });
+    }
+
+    return { handle, stats, attach };
 }
 
 export default createGuard;

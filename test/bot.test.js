@@ -71,3 +71,14 @@ test('WA_BROWSER=android pairs as a phone-class companion', async (t) => {
     assert.equal(companion.receivesViewOnceMedia, true);
     assert.equal(browser[0], 'Test Phone', 'the device name is what the owner sees in Linked devices');
 });
+
+test('startBot wires the raw-stanza sweep: a withheld one-time message from a flagged member is revoked', async (t) => {
+    const sweepFixture = fileURLToPath(new URL('./fixtures/view-once-sweep.js', import.meta.url));
+    const dir = await mkdtemp(join(tmpdir(), 'quizly-sweep-'));
+    t.after(() => rm(dir, { recursive: true, force: true }));
+    const { stdout, stderr } = await run(process.execPath, [sweepFixture, dir], { timeout: 15_000 });
+    assert.equal(stderr, '');
+    const out = JSON.parse(stdout.trim());
+    assert.deepEqual(out.deletes, [{ remoteJid: '120363000000000000@g.us', participant: '923009876543@s.whatsapp.net', id: 'LIVE1', fromMe: false }]);
+    assert.equal(out.viewOnce, 1);
+});

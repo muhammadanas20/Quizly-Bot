@@ -151,6 +151,11 @@ export async function startBot({
             getMessage                  : async () => undefined
         });
 
+        // Baileys drops the current withheld one-time shape before
+        // `messages.upsert` fires; the sweep listens to the raw stanza events
+        // this socket emits instead. Re-attached on every reconnect.
+        guard.attach(sock);
+
         // Events from a superseded socket are ignored (gen check): only the
         // live socket may persist creds, route messages or trigger reconnects.
         sock.ev.on('creds.update', (update) => {
@@ -194,8 +199,8 @@ export async function startBot({
                 log.raw(`  📲  companion: ${config.companion.label}`);
                 if (config.guardEnabled && !config.companion.receivesViewOnceMedia) {
                     log.raw('     one-time (view-once) media is withheld by WhatsApp from web-class');
-                    log.raw('     devices — those are still revoked blind; WA_BROWSER=android (pair');
-                    log.raw('     again) makes WhatsApp send the media too.');
+                    log.raw('     devices — those are still revoked from the raw stanza; WA_BROWSER=android');
+                    log.raw('     (pair again) makes WhatsApp send the media too.');
                 }
                 log.raw(`  🧠  ai       : ${config.aiOrder.filter((p) => config[p]?.key).join(' → ')}`);
                 log.raw(`  💾  memory   : ${mem} MB RSS`);
