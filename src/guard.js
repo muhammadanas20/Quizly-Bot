@@ -6,6 +6,11 @@
  * NOTHING: no warning, reply, or replacement media. The only trace is one
  * debug line in the server console plus a counter you can read with !stats.
  *
+ * One-time ("view once") media is the awkward case: WhatsApp only ships it to
+ * phone-class linked devices, so a web-class companion receives the message
+ * with the media withheld and no message body at all — just `key.isViewOnce`.
+ * The revoke needs only the key, so those are removed too, blind.
+ *
  * The decision is a pure function (decide) so it can be unit-tested without a
  * live WhatsApp socket.
  */
@@ -14,6 +19,20 @@ import { classifyKind, identitiesOf } from './message.js';
 import { DEFAULT_GUARD_MEDIA } from './config.js';
 
 const NOTHING_TO_DELETE = new Set(['system', 'reaction', 'unknown']);
+
+/**
+ * What a one-time message could be hiding. WhatsApp only allows view-once for
+ * photos, videos and voice notes, so a rule that blocks any of those also
+ * covers a `'viewonce'` message whose media WhatsApp never showed us — we
+ * cannot tell which of them it was, and a flagged member's hidden media is
+ * precisely what the guard exists to remove.
+ */
+const VIEW_ONCE_COVERS = ['image', 'video', 'gif', 'audio'];
+
+/** Does this rule cover a one-time message whose media we were not shown? */
+export function ruleCoversViewOnce(rule = []) {
+    return rule.includes('all') || rule.includes('viewonce') || rule.some((k) => VIEW_ONCE_COVERS.includes(k));
+}
 
 /**
  * Pure decision. `botIsAdmin` may be true | false | 'unknown'.
@@ -44,7 +63,12 @@ export function decide({
     if (!hit) return { act: 'skip', reason: 'not-flagged' };
 
     const rule = (hit.entry?.media?.length ? hit.entry.media : blocked) || [];
-    if (!rule.includes('all') && !rule.includes(kind)) {
+    if (kind === 'viewonce') {
+        // One-time media WhatsApp withheld: the kind is unknowable, so any
+        // media rule at all covers it. GUARD_MEDIA=sticker on its own is an
+        // explicit "stickers only" policy and still leaves it alone.
+        if (!ruleCoversViewOnce(rule)) return { act: 'skip', reason: 'kind-allowed:viewonce' };
+    } else if (!rule.includes('all') && !rule.includes(kind)) {
         return { act: 'skip', reason: `kind-allowed:${kind}` };
     }
 
@@ -72,7 +96,7 @@ export function collectSenderIds(msg, sock) {
 
 /** Live guard bound to a socket. */
 export function createGuard({ sock, flags, config, log, isAdmin }) {
-    const stats = { deleted: 0, skippedNotAdmin: 0, byUser: new Map(), lastAt: null };
+    const stats = { deleted: 0, viewOnce: 0, skippedNotAdmin: 0, byUser: new Map(), lastAt: null };
     const whitelist = new Set(config.guardWhitelist);
 
     async function handle(msg) {
@@ -85,7 +109,9 @@ export function createGuard({ sock, flags, config, log, isAdmin }) {
 
         const jid     = msg.key.remoteJid;
         const sender  = msg.key.participant || jid;
-        const kind    = classifyKind(msg.message);
+        // `msg.key` matters: a one-time message a web-class companion is not
+        // allowed to see arrives with NO message body, only `key.isViewOnce`.
+        const kind    = classifyKind(msg.message, msg.key);
         const admin   = await Promise.resolve(isAdmin(jid));
 
         const verdict = decide({
@@ -119,10 +145,15 @@ export function createGuard({ sock, flags, config, log, isAdmin }) {
         const label = verdict.entry?.label || sender;
         const total = flags.bumpDeleted(senderIds);
         stats.deleted++;
+        if (kind === 'viewonce') stats.viewOnce++;
         stats.lastAt = new Date().toISOString();
         stats.byUser.set(label, (stats.byUser.get(label) || 0) + 1);
 
-        log.debug(`guard: removed ${kind} from ${label} in ${jid} (${Date.now() - started}ms, ${total} total)`);
+        // A revoked one-time message is revoked blind: WhatsApp keeps the media
+        // from web-class linked devices, so all we ever get is `key.isViewOnce`.
+        // The revoke only needs the key, so the removal still works.
+        const blind = kind === 'viewonce' ? ' — one-time media, withheld by WhatsApp' : '';
+        log.debug(`guard: removed ${kind} from ${label} in ${jid} (${Date.now() - started}ms, ${total} total)${blind}`);
         return verdict;
     }
 

@@ -17,6 +17,12 @@ const WRAPPERS = [
     'editedMessage'
 ];
 
+/** The three envelopes WhatsApp uses for "one time" (view-once) media. */
+const VIEW_ONCE_WRAPPERS = ['viewOnceMessage', 'viewOnceMessageV2', 'viewOnceMessageV2Extension'];
+
+/** Media nodes that can carry the flat `viewOnce: true` flag. */
+const MEDIA_NODES = ['imageMessage', 'videoMessage', 'audioMessage', 'documentMessage'];
+
 /** Peel envelopes so `imageMessage` etc. can be found wherever WhatsApp hides it. */
 export function unwrap(message) {
     let cur = message;
@@ -44,26 +50,72 @@ export function extractText(message) {
 }
 
 /**
- * Coarse media kind of a message. View-once/ephemeral wrappers are peeled by
- * unwrap(), so a one-time photo is classified as an ordinary 'image' and is
- * covered by the guard's image policy.
- * @returns {'sticker'|'image'|'video'|'gif'|'audio'|'document'|'link'|'text'|
- *          'location'|'contact'|'poll'|'reaction'|'system'|'unknown'}
+ * Is this a view-once ("one time") message?
+ *
+ * Three different shapes have to count, because which one you get depends on
+ * how this bot is paired:
+ *
+ *   1. `key.isViewOnce` — set by Baileys when WhatsApp refuses to hand the
+ *      media to this linked device. The stanza then carries
+ *      `<unavailable type="view_once"/>` instead of ciphertext, so the message
+ *      arrives with **no `message` payload at all**, only this flag on the key.
+ *      This is the normal case for a web-class companion (`Browsers.macOS(...)`,
+ *      the default here) and it is exactly why "the one-time photo of a flagged
+ *      member stayed in the group": there was nothing to classify.
+ *   2. a `viewOnceMessage` / `V2` / `V2Extension` wrapper — media included,
+ *      which is what a phone-class companion receives.
+ *   3. the flat `viewOnce: true` flag on the media node itself.
+ *
+ * @param {object} [message] `msg.message` — may be undefined for case 1
+ * @param {object} [key]     `msg.key` — carries `isViewOnce` for case 1
  */
-export function classifyKind(message) {
-    if (!message) return 'unknown';
-    const m = unwrap(message);
+export function isViewOnce(message, key) {
+    if (key?.isViewOnce) return true;
 
-    if (m.stickerMessage)   return 'sticker';
-    if (m.imageMessage)     return 'image';
-    if (m.videoMessage)     return m.videoMessage.gifPlayback ? 'gif' : 'video';
-    if (m.audioMessage)     return 'audio';
-    if (m.documentMessage)  return 'document';
-    if (m.locationMessage)  return 'location';
-    if (m.contactMessage || m.contactsArrayMessage) return 'contact';
-    if (m.pollCreationMessage || m.pollCreationMessageV2 || m.pollCreationMessageV3) return 'poll';
-    if (m.reactionMessage)  return 'reaction';
-    if (m.protocolMessage || m.senderKeyDistributionMessage) return 'system';
+    let cur = message;
+    for (let depth = 0; cur && depth < 6; depth++) {
+        if (VIEW_ONCE_WRAPPERS.some((w) => cur[w])) return true;
+        if (cur.viewOnce === true) return true;
+        for (const node of MEDIA_NODES) {
+            if (cur[node]?.viewOnce) return true;
+        }
+        // step down through any other envelope (disappearing messages wrap
+        // view-once media one level deeper) and look again
+        const envelope = WRAPPERS.find((w) => cur[w]);
+        if (!envelope) break;
+        cur = cur[envelope]?.message ?? cur[envelope];
+    }
+    return false;
+}
+
+/**
+ * Coarse media kind of a message. View-once/ephemeral wrappers are peeled by
+ * unwrap(), so a one-time photo that arrives *with* its media is classified as
+ * an ordinary 'image' and is covered by the guard's image policy.
+ *
+ * A one-time message whose media WhatsApp withheld (web-class companion) is
+ * classified as `'viewonce'`: we know it is hidden media, just not which kind.
+ * @returns {'sticker'|'image'|'video'|'gif'|'audio'|'document'|'link'|'text'|
+ *          'location'|'contact'|'poll'|'reaction'|'system'|'viewonce'|'unknown'}
+ */
+export function classifyKind(message, key) {
+    const viewOnce = isViewOnce(message, key);
+    const m = message ? unwrap(message) : null;
+
+    if (m?.stickerMessage)   return 'sticker';
+    if (m?.imageMessage)     return 'image';
+    if (m?.videoMessage)     return m.videoMessage.gifPlayback ? 'gif' : 'video';
+    if (m?.audioMessage)     return 'audio';
+    if (m?.documentMessage)  return 'document';
+    if (m?.locationMessage)  return 'location';
+    if (m?.contactMessage || m?.contactsArrayMessage) return 'contact';
+    if (m?.pollCreationMessage || m?.pollCreationMessageV2 || m?.pollCreationMessageV3) return 'poll';
+    if (m?.reactionMessage)  return 'reaction';
+    if (m?.protocolMessage || m?.senderKeyDistributionMessage) return 'system';
+
+    // Nothing visible, but WhatsApp told us it was a one-time message: that is
+    // a media message we were not allowed to see, never an empty message.
+    if (viewOnce) return 'viewonce';
 
     const text = extractText(message);
     if (text) return /https?:\/\/\S+/i.test(text) ? 'link' : 'text';

@@ -84,6 +84,35 @@ test('decide: system messages and reactions are never revoked', () => {
     }
 });
 
+// ── one-time ("view once") media WhatsApp withheld ───────────────────────────
+// A web-class linked device never receives the media, so all the guard gets is
+// `key.isViewOnce` and a kind of 'viewonce'. It must still be revoked.
+test('decide: withheld one-time media is removed under any photo/video/audio rule', () => {
+    for (const blocked of [['sticker', 'image'], ['image'], ['video'], ['audio'], ['all'], ['viewonce']]) {
+        assert.equal(decide(base({ kind: 'viewonce', blocked })).act, 'delete', `blocked=${blocked}`);
+    }
+});
+
+test('decide: a stickers-only policy leaves withheld one-time media alone', () => {
+    const d = decide(base({ kind: 'viewonce', blocked: ['sticker'] }));
+    assert.equal(d.act, 'skip');
+    assert.equal(d.reason, 'kind-allowed:viewonce');
+});
+
+test('decide: a per-user media override also decides one-time media', () => {
+    const flags = { find: () => ({ key: 'x', entry: { keys: ['x'], media: ['sticker'] } }) };
+    assert.equal(decide(base({ kind: 'viewonce', flags })).reason, 'kind-allowed:viewonce');
+});
+
+test('decide: withheld one-time media still respects every other rule', () => {
+    assert.equal(decide(base({ kind: 'viewonce', isGroup: false })).reason, 'not-a-group');
+    assert.equal(decide(base({ kind: 'viewonce', fromMe: true })).reason, 'own-message');
+    assert.equal(decide(base({ kind: 'viewonce', guardEnabled: false })).reason, 'guard-off');
+    assert.equal(decide(base({ kind: 'viewonce', whitelist: new Set(['923001234567']) })).reason, 'whitelisted');
+    assert.equal(decide(base({ kind: 'viewonce', flags: { find: () => null } })).reason, 'not-flagged');
+    assert.equal(decide(base({ kind: 'viewonce', botIsAdmin: false })).reason, 'bot-not-admin');
+});
+
 // ── identity collection (Baileys 7 LID handling) ─────────────────────────────
 test('collectSenderIds: gathers participant + participantAlt', () => {
     const ids = collectSenderIds({ key: { participant: USER, participantAlt: '555@lid' } }, {});
@@ -181,6 +210,40 @@ test('guard: photos, including view-once photos, are deleted by default', async 
     assert.equal((await guard.handle(imageMsg)).act, 'delete');
     assert.equal((await guard.handle(viewOnceMsg)).act, 'delete');
     assert.deepEqual(sent.map((s) => s.content.delete.id), ['IMG1', 'IMG2']);
+});
+
+test('guard: removes a one-time message whose media WhatsApp withheld', async () => {
+    const { guard, sent, flags } = makeWorld();
+
+    // Exactly what Baileys delivers a web-class companion for a view-once
+    // message: `key.isViewOnce` set, and no message body whatsoever.
+    const withheld = {
+        key    : { remoteJid: GROUP, participant: USER, fromMe: false, id: 'VO1', isViewOnce: true }
+    };
+
+    const verdict = await guard.handle(withheld);
+
+    assert.equal(verdict.act, 'delete', 'the revoke must still happen without the media');
+    assert.equal(sent.length, 1);
+    assert.deepEqual(sent[0].content, { delete: withheld.key });
+    assert.equal(sent[0].jid, GROUP);
+    assert.equal(guard.stats.deleted, 1);
+    assert.equal(guard.stats.viewOnce, 1);
+    assert.equal(flags.find(new Set(['923001234567'])).entry.deleted, 1);
+});
+
+test('guard: a withheld one-time message survives a stickers-only policy', async () => {
+    const { guard, sent } = makeWorld({ guardMedia: 'sticker' });
+    const withheld = { key: { remoteJid: GROUP, participant: USER, fromMe: false, id: 'VO2', isViewOnce: true } };
+    assert.equal((await guard.handle(withheld)).reason, 'kind-allowed:viewonce');
+    assert.equal(sent.length, 0);
+});
+
+test('guard: an unflagged sender\'s one-time message is untouched', async () => {
+    const { guard, sent } = makeWorld();
+    const withheld = { key: { remoteJid: GROUP, participant: '923009999999@s.whatsapp.net', fromMe: false, id: 'VO3', isViewOnce: true } };
+    assert.equal(await guard.handle(withheld), null);
+    assert.equal(sent.length, 0);
 });
 
 test('guard: GUARD_MEDIA=sticker keeps photos allowed', async () => {

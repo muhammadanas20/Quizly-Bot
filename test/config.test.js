@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { loadConfig, validateConfig, normalizeId, parseSeedFlags } from '../src/config.js';
+import { Browsers } from '@whiskeysockets/baileys';
+
+import { loadConfig, validateConfig, normalizeId, parseSeedFlags, parseCompanion, companionBrowser } from '../src/config.js';
 
 test('normalizeId: every spelling of a phone number collapses to digits', () => {
     const forms = [
@@ -83,4 +85,37 @@ test('validateConfig: passes with a single key and reports which provider', () =
     const v = validateConfig(loadConfig({ GEMINI_API_KEY: 'k', OWNER_NUMBERS: '923001234567' }));
     assert.equal(v.ok, true);
     assert.deepEqual(v.usableProviders, ['gemini']);
+});
+
+// ── one-time ("view once") media ─────────────────────────────────────────────
+test('loadConfig: GUARD_MEDIA accepts the withheld one-time kind', () => {
+    assert.deepEqual(loadConfig({ GUARD_MEDIA: 'sticker,image,viewonce' }).guardMedia, ['sticker', 'image', 'viewonce']);
+});
+
+test('loadConfig: the companion identity defaults to web-class', () => {
+    const c = loadConfig({}).companion;
+    assert.equal(c.kind, 'web');
+    assert.equal(c.receivesViewOnceMedia, false);
+});
+
+test('loadConfig: WA_BROWSER=android pairs as a phone-class companion', () => {
+    assert.equal(loadConfig({ WA_BROWSER: 'android' }).companion.kind, 'android');
+    assert.equal(loadConfig({ WA_BROWSER: 'ANDROID' }).companion.receivesViewOnceMedia, true);
+    assert.equal(loadConfig({ WA_BROWSER: 'android', WA_BROWSER_NAME: 'Pixel 8' }).companion.name, 'Pixel 8');
+    assert.equal(loadConfig({ WA_BROWSER: 'carrier-pigeon' }).companion.kind, 'web', 'unknown values fall back');
+});
+
+test('companionBrowser: only android lands on Baileys\' Android identity', () => {
+    // Baileys keys the device class off browser[1]: 'Android' → phone class,
+    // anything else → Platform.WEB, which WhatsApp withholds one-time media from.
+    assert.deepEqual(companionBrowser(parseCompanion('android', 'Pixel 8'), Browsers), ['Pixel 8', 'Android', '']);
+    assert.deepEqual(companionBrowser(parseCompanion('web'), Browsers), Browsers.macOS('Desktop'));
+    assert.notEqual(String(companionBrowser(parseCompanion('web'), Browsers)[1]).toLowerCase(), 'android');
+});
+
+test('validateConfig: warns that a web-class device is not sent one-time media', () => {
+    const base = { GEMINI_API_KEY: 'k', OWNER_NUMBERS: '923001234567' };
+    assert.ok(validateConfig(loadConfig(base)).warnings.some((w) => /one-time/.test(w)));
+    assert.equal(validateConfig(loadConfig({ ...base, WA_BROWSER: 'android' })).warnings.some((w) => /one-time/.test(w)), false);
+    assert.equal(validateConfig(loadConfig({ ...base, STICKER_GUARD: 'off' })).warnings.some((w) => /one-time/.test(w)), false);
 });

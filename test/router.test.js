@@ -205,6 +205,34 @@ test('router: flagged photos, including view-once, are revoked before quiz proce
     assert.equal(texts().length, 0, 'deleted photos are never sent to the quiz solver or posted');
 });
 
+test('router: a withheld one-time message is revoked and never reaches the quiz solver', async () => {
+    const { router, flags, sent, texts, deletes } = world();
+    flags.add(new Set(['923009876543']), { label: 'Spammer' });
+
+    // What a web-class linked device actually receives for a one-time photo:
+    // `key.isViewOnce` and no message body. This is the shape that used to
+    // classify as 'unknown' and slip straight through the guard.
+    const withheld = msg({
+        key    : { remoteJid: GROUP, participant: TARGET, fromMe: false, id: 'VO1', isViewOnce: true },
+        message: undefined
+    });
+
+    assert.deepEqual(await router.processMessage(withheld), { guarded: true });
+    assert.deepEqual(deletes().map((s) => s.content.delete.id), ['VO1']);
+    assert.equal(texts().length, 0, 'nothing is posted to the group');
+    assert.equal(sent.length, 1, 'one revoke, nothing else');
+});
+
+test('router: an unflagged member\'s one-time message is simply ignored', async () => {
+    const { router, sent } = world();
+    const withheld = msg({
+        key    : { remoteJid: GROUP, participant: TARGET, fromMe: false, id: 'VO2', isViewOnce: true },
+        message: undefined
+    });
+    assert.deepEqual(await router.processMessage(withheld), { nothing: true });
+    assert.equal(sent.length, 0);
+});
+
 test('router: the guard runs even for a sender who is not the owner', async () => {
     const { router, flags, deletes } = world({ botIsAdmin: true });
     flags.add(new Set(['923009876543']));

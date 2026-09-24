@@ -28,6 +28,7 @@ import { createQuizHandler } from './quiz.js';
 import { createCommandHandler } from './commands.js';
 import { createRouter } from './router.js';
 import { createInstanceLock } from './lock.js';
+import { companionBrowser } from './config.js';
 
 const RECONNECT_BASE_MS = 3000;
 const RECONNECT_MAX_MS = 60000;
@@ -136,7 +137,11 @@ export async function startBot({
             auth                        : state,
             logger                      : log,
             printQRInTerminal           : false,
-            browser                     : Browsers.macOS('Desktop'),
+            // WA_BROWSER=android pairs as a phone-class companion, which is the
+            // only class WhatsApp ships one-time (view-once) media to. The web
+            // default keeps an existing pairing valid; the guard still revokes
+            // withheld one-time media blind, it just never sees the bytes.
+            browser                     : companionBrowser(config.companion, Browsers),
             // Speed + memory: skip the work a bot does not need.
             syncFullHistory             : false,
             markOnlineOnConnect         : false,
@@ -186,6 +191,12 @@ export async function startBot({
                 log.raw(`  🎯  trigger  : "${config.quizTrigger}" + image`);
                 log.raw(`  🚩  flagged  : ${flags.count} member(s)`);
                 log.raw(`  🛡️  guard    : ${config.guardEnabled ? `ON (${config.guardMedia.join(', ')})` : 'OFF'}`);
+                log.raw(`  📲  companion: ${config.companion.label}`);
+                if (config.guardEnabled && !config.companion.receivesViewOnceMedia) {
+                    log.raw('     one-time (view-once) media is withheld by WhatsApp from web-class');
+                    log.raw('     devices — those are still revoked blind; WA_BROWSER=android (pair');
+                    log.raw('     again) makes WhatsApp send the media too.');
+                }
                 log.raw(`  🧠  ai       : ${config.aiOrder.filter((p) => config[p]?.key).join(' → ')}`);
                 log.raw(`  💾  memory   : ${mem} MB RSS`);
                 log.raw('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');

@@ -49,7 +49,7 @@ answered before the next one starts — exactly the order you asked for.
 ## How the media guard works
 
 ```
-sticker or photo arrives (view-once photos are unwrapped as images)
+sticker or photo arrives (one-time media is recognised even when its bytes are withheld)
   └─ is the sender on the flag list?          ← one Set lookup, nothing else if not
        └─ is the media type blocked?          ← stickers + images by default; configurable
             └─ is the bot an admin here?      ← cached per group
@@ -67,6 +67,32 @@ sticker or photo arrives (view-once photos are unwrapped as images)
 * The default `GUARD_MEDIA=sticker,image` removes stickers and ordinary/view-once photos.
   Set `GUARD_MEDIA=all` to remove every supported media type; if your existing `.env`
   still says `GUARD_MEDIA=sticker`, change it to `sticker,image` to enable photo removal.
+
+### One-time (“view once”) media
+
+WhatsApp only ships one-time media to a **phone-class** linked device. A web-class one —
+which is what `Browsers.macOS('Desktop')` pairs as — receives the stanza with
+`<unavailable type="view_once"/>` instead of the ciphertext, and Baileys turns that into a
+message with **no body at all**, only `key.isViewOnce = true`
+(`@whiskeysockets/baileys` `lib/Utils/decode-wa-message.js:224`).
+
+That is why one-time media used to survive the guard: with no body there was nothing to
+classify, the kind came back `unknown`, and `unknown` is on the never-delete list. It is
+now recognised from the key and classified `viewonce`, and — because revoking a message
+needs only its key, never its bytes — it is deleted just like any other blocked media.
+`!stats` counts them separately (`of which one-time media: n`).
+
+Two knobs:
+
+| Variable | Default | What it does |
+|---|---|---|
+| `WA_BROWSER` | `web` | `web` keeps your existing pairing. `android` pairs as a phone-class companion so WhatsApp sends one-time media too — **you have to pair once more after switching**. Either way one-time media is revoked. |
+| `WA_BROWSER_NAME` | `Quizly Bot` | The device name shown in *Linked devices* when paired as `android`. |
+
+A withheld one-time message cannot be a sticker or a document — WhatsApp only allows
+one-time photos, videos and voice notes — so any `GUARD_MEDIA` containing `image`,
+`video`, `gif` or `audio` (or `all`, or `viewonce`) covers it. `GUARD_MEDIA=sticker` on
+its own is an explicit stickers-only policy and leaves it alone.
 
 ## Commands
 
@@ -232,15 +258,24 @@ Check it yourself on the VM: `pm2 monit` or `free -h`.
 | 9 | When the model's JSON did not parse, the raw JSON was posted into the group (`{"questions":[{"n":1,…`) — and it happened whenever the answer was cut off by the token limit, which is most long quizzes | Four-pass parser (strict JSON → repaired document → key/value pairs → numbered prose), a token ceiling that actually fits a long quiz, and a warning instead of a silent short answer |
 | 10 | `!flag` / `!unflag` typed from the bot's own account were silently dropped — the router returned `own` before the command handler ran, so the command did nothing at all and gave no feedback | Own-account commands are processed as owner commands, and every owner command answers with a reaction on the command message (🚩 / ✅ / ℹ️ / ⛔) |
 | 11 | A flag set from an `@mention` was stored under the LID only, while the same person's messages arrive by phone number — so the guard could miss them and `!unflag` by number reported "not flagged" | Every target is stored under **all** of its identities (phone number + LID), the guard aliases any new identity it sees onto the entry, and the label uses the member's name instead of a raw LID |
+| 12 | A flagged member's **one-time ("view once") media stayed in the group**. WhatsApp withholds one-time media from web-class linked devices, so Baileys delivered the message with no body at all and only `key.isViewOnce`; `classifyKind` then returned `unknown`, which is on the guard's never-delete list. The old tests passed because they built view-once payloads *with* the media inside — a shape a web-class companion never receives. | `isViewOnce()` reads `key.isViewOnce`, the `viewOnceMessage*` wrappers and the flat media flag; the guard classifies it `viewonce` and revokes it blind, since a revoke needs only the message key. `WA_BROWSER=android` optionally pairs as a phone-class companion so WhatsApp ships the media too |
 
 > **What I could not verify here.** This sandbox has no outbound internet, no WhatsApp
 > number and no API keys, so I could not complete a live login or a real Gemini/Grok call.
-> What *is* verified: 183 unit and integration tests over the guard, the router, the
+> What *is* verified: 212 unit and integration tests over the guard, the router, the
 > formatting, the provider request shapes and the fallback logic; a real process boot
 > (socket constructed, reconnect backoff, clean shutdown); and every request body asserted
 > against the documented API shapes. Two claims I made earlier about the old code were
 > wrong and are corrected above — `message_create` is not outgoing-only, and `msg.body` is
 > always a string in whatsapp-web.js (`src/structures/Message.js:55`), so it never threw.
+>
+> For the one-time media fix specifically: the shape of a withheld one-time message is read
+> from the installed `@whiskeysockets/baileys@7.0.0-rc14` itself
+> (`lib/Utils/decode-wa-message.js:224` sets `key.isViewOnce`, `:303` then skips the stub),
+> and the device class mapping from `lib/Utils/validate-connection.js:16,48`. The revoke path
+> is tested end-to-end against that exact shape. What is **not** verified here is the live
+> wire behaviour — that requires a real pairing — so if you switch to `WA_BROWSER=android`,
+> pair again and confirm one-time media arrives.
 
 ---
 
