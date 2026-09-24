@@ -1,13 +1,17 @@
 /**
- * src/commands.js — the small command set the owner drives the bot with.
+ * src/commands.js — the command surface everyone types at the bot.
  *
- *   !help                       anyone
+ *   !help                                anyone
  *   !flag <@person|number> [reason]      owner
  *   !unflag <@person|number>             owner
  *   !flags                               owner
  *   !guard on|off|status                 owner
  *   !quiz                                anyone (solve attached/quoted image now)
  *   !ping  !stats                        anyone
+ *
+ *   !game [list|help|top|me|stop|addq|name]  anyone — the game engine (games.js)
+ *   !guess <answer>  !in  !top               anyone — those games' shortcuts
+ *   !random !roll !flip !pick !shuffle !8ball  anyone — instant randomness
  *
  * parseCommand() is pure so the parsing rules are covered by tests.
  */
@@ -18,15 +22,32 @@ import { identitiesOf } from './message.js';
 export const PREFIX = '!';
 export const OWNER_ONLY = new Set(['flag', 'unflag', 'flags', 'guard']);
 
+/** Answer used when GAMES=off, so a game command never goes unanswered. */
+const NO_GAMES = { handled: true, react: '⚠️', reply: '⚠️ Games are not enabled on this bot.' };
+
 const ALIASES = {
     unflag  : ['unflag', 'removeflag', 'pardon'],
     flag    : ['flag', 'ban', 'block'],
-    flags   : ['flags', 'flagged', 'list'],
+    flags   : ['flags', 'flagged'],
     guard   : ['guard', 'stickerguard'],
     quiz    : ['quiz', 'solve'],
     help    : ['help', 'commands'],
     ping    : ['ping'],
-    stats   : ['stats', 'status']
+    stats   : ['stats', 'status'],
+
+    // games — the engine understands these, commands.js only routes them
+    game    : ['game', 'games', 'play'],
+    guess   : ['guess', 'g', 'a', 'ans', 'answer'],
+    join    : ['in', 'join'],
+    top     : ['top', 'scoreboard', 'scores', 'leaderboard', 'rank'],
+
+    // instant randomness
+    random  : ['random', 'rand', 'rng', 'number'],
+    roll    : ['roll', 'dice', 'die'],
+    flip    : ['flip', 'coin', 'toss'],
+    pick    : ['pick', 'choose'],
+    shuffle : ['shuffle', 'mix'],
+    eightball: ['8ball', 'eightball', 'ball', 'ask']
 };
 
 const CANONICAL = Object.fromEntries(
@@ -55,23 +76,42 @@ export const HELP_TEXT = [
     '',
     `Send a message containing *${'{TRIGGER}'}* together with a screenshot of the quiz and the bot answers every question in order: question → one-line reason → answer.`,
     '',
-    '*Commands*',
+    '*Games — everyone can play*',
+    '```',
+    `${PREFIX}game                   every game + the commands`,
+    `${PREFIX}game <name>            start a round (number, dice, coin, slots,`,
+    '                       math, scramble, trivia, lucky)',
+    `${PREFIX}guess <answer>         take a shot (!g works too)`,
+    `${PREFIX}in                     join a lucky draw`,
+    `${PREFIX}top                    leaderboard of this chat (${PREFIX}top all = global)`,
+    `${PREFIX}game me                your own score card`,
+    `${PREFIX}game stop              end the round in play`,
+    `${PREFIX}game addq Q ; A        add your own trivia question`,
+    '```',
+    '*Random*',
+    '```',
+    `${PREFIX}random [n | 1-100 | a, b]   random number or pick`,
+    `${PREFIX}roll [2d6]  ${PREFIX}flip  ${PREFIX}pick a, b  ${PREFIX}shuffle a, b  ${PREFIX}8ball q`,
+    '```',
+    '*Quiz*',
     '```',
     `${PREFIX}quiz                 solve the attached / replied image now`,
+    `${PREFIX}ping  ${PREFIX}stats        latency · deletes, AI usage, memory`,
+    '```',
+    '*Owner only*',
+    '```',
     `${PREFIX}flag <@person> [why]   remove their stickers and photos (default)`,
     `${PREFIX}flag <@person> media=sticker,image`,
     'View-once photos are included; configure GUARD_MEDIA for other media types.',
     `${PREFIX}unflag <@person>       remove a flag`,
     `${PREFIX}flags                  list flagged members`,
     `${PREFIX}guard on|off|status    toggle the media guard`,
-    `${PREFIX}stats                  deletes, AI usage, memory`,
-    `${PREFIX}ping                   latency check`,
     '```',
     '',
     'The guard never replies in the group — flagged stickers and photos just disappear.'
 ].join('\n');
 
-export function createCommandHandler({ config, flags, log, guard, limiter, groups, solveNow, startedAt }) {
+export function createCommandHandler({ config, flags, log, guard, limiter, groups, games, randomTools, scores, solveNow, startedAt }) {
     /**
      * Resolve "!flag" / "!unflag" targets: a mention wins, then a typed number.
      *
@@ -161,6 +201,9 @@ export function createCommandHandler({ config, flags, log, guard, limiter, group
                         `Flagged members: ${flags.count}`,
                         `AI calls: ${rate.minute}/${rate.perMinute} this minute · ${rate.day}/${rate.perDay} today`,
                         top.length ? `Top offenders: ${top.map(([n, c]) => `${n} (${c})`).join(', ')}` : null,
+                        games
+                            ? `Games: ${scores?.playerCount ?? 0} player(s) on the board · ${scores?.questionCount ?? 0} trivia question(s)`
+                            : 'Games: OFF',
                         `Memory: ${mem} MB · uptime ${uptime()}`
                     ].filter(Boolean).join('\n')
                 };
@@ -268,6 +311,36 @@ export function createCommandHandler({ config, flags, log, guard, limiter, group
                     react  : want ? '🛡️' : '🔕',
                     reply  : `Guard is now ${want ? 'ON' : 'OFF'}.`
                 };
+            }
+
+            // ── games ────────────────────────────────────────────────────────
+            // Every one of these belongs to everyone, not just the owner: the
+            // whole point is a group that plays together and keeps score.
+            case 'game':
+                if (!games) return NO_GAMES;
+                return await games.handle(ctx, cmd.args);
+
+            case 'guess':
+                if (!games) return NO_GAMES;
+                return await games.guess(ctx, cmd.args);
+
+            case 'join':
+                if (!games) return NO_GAMES;
+                return await games.join(ctx);
+
+            case 'top':
+                if (!games) return NO_GAMES;
+                return { handled: true, reply: games.board(ctx, cmd.args[0]) };
+
+            // ── instant randomness (no round, no scoreboard) ─────────────────
+            case 'random':
+            case 'roll':
+            case 'flip':
+            case 'pick':
+            case 'shuffle':
+            case 'eightball': {
+                if (!randomTools) return { handled: false };
+                return randomTools.handle(cmd.name, cmd.args);
             }
 
             case 'quiz': {

@@ -32,6 +32,47 @@ test('parseCommand: is case insensitive', () => {
     assert.equal(parseCommand('!FLAG 923001234567').name, 'flag');
 });
 
+test('parseCommand: the game and randomness shortcuts are recognised', () => {
+    assert.equal(parseCommand('!game').name, 'game');
+    assert.equal(parseCommand('!game number 1-50').name, 'game');
+    assert.deepEqual(parseCommand('!game number 1-50').args, ['number', '1-50']);
+    assert.equal(parseCommand('!play').name, 'game');
+    assert.equal(parseCommand('!guess 42').name, 'guess');
+    assert.equal(parseCommand('!g 42').name, 'guess');
+    assert.equal(parseCommand('!in').name, 'join');
+    assert.equal(parseCommand('!top').name, 'top');
+    assert.equal(parseCommand('!leaderboard').name, 'top');
+    assert.equal(parseCommand('!random 1-10').name, 'random');
+    assert.equal(parseCommand('!number').name, 'random');
+    assert.equal(parseCommand('!roll 2d6').name, 'roll');
+    assert.equal(parseCommand('!flip').name, 'flip');
+    assert.equal(parseCommand('!coin').name, 'flip');
+    assert.equal(parseCommand('!pick a, b').name, 'pick');
+    assert.equal(parseCommand('!shuffle a, b').name, 'shuffle');
+    assert.equal(parseCommand('!8ball yes?').name, 'eightball');
+});
+
+test('!help advertises the games, the score commands and the randomness', async () => {
+    const { handler, ctx } = world({ isOwner: false });
+    const out = await handler.handle(ctx('!help'));
+
+    assert.match(out.reply, /Games — everyone can play/);
+    assert.match(out.reply, /!game /);
+    assert.match(out.reply, /!guess/);
+    assert.match(out.reply, /!top/);
+    assert.match(out.reply, /!8ball/);
+    assert.match(out.reply, /Owner only/);
+});
+
+test('game commands answer politely when the games are switched off', async () => {
+    const { handler, ctx } = world();          // this world has no game engine
+    for (const text of ['!game', '!guess 42', '!in', '!top']) {
+        const out = await handler.handle(ctx(text));
+        assert.equal(out.handled, true, text);
+        assert.match(out.reply, /Games are not enabled|not enabled on this bot/);
+    }
+});
+
 // ── handler ──────────────────────────────────────────────────────────────────
 function world({ isOwner = true, env = {}, groupNames = {} } = {}) {
     const flags = createFlagStore({ file: path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'c-')), 'f.json') });

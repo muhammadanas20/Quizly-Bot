@@ -4,8 +4,9 @@
  * Order matters:
  *   1. media guard    — must run first and must be cheap; this is the feature
  *                       that has to feel instant
- *   2. commands       — owner control surface
- *   3. quiz trigger   — the expensive path, only reached when asked for
+ *   2. commands       — owner control surface + the game commands
+ *   3. game rounds    — a plain "57" or "heads" is a guess while one is running
+ *   4. quiz trigger   — the expensive path, only reached when asked for
  *
  * Kept separate from bot.js so the routing can be driven in tests with a fake
  * socket instead of a live WhatsApp connection.
@@ -25,7 +26,7 @@ export function shouldIgnore(jid) {
     return IGNORED_SUFFIXES.some((s) => j.endsWith(s));
 }
 
-export function createRouter({ sock, config, log, flags, guard, groups, quiz, commands }) {
+export function createRouter({ sock, config, log, flags, guard, groups, quiz, commands, games }) {
     async function processMessage(msg) {
         const jid = msg?.key?.remoteJid;
         if (shouldIgnore(jid)) return { ignored: true };
@@ -78,23 +79,29 @@ export function createRouter({ sock, config, log, flags, guard, groups, quiz, co
             expandIds        : (raw) => identitiesOf(raw, sock)
         };
 
+        /**
+         * The reaction is the confirmation: it lands on the command message
+         * itself, so the group sees "done" without the bot having to say
+         * anything. Shared by commands and game replies.
+         */
+        async function deliver(out) {
+            if (out?.react) {
+                try {
+                    await sock.sendMessage(jid, { react: { text: out.react, key: msg.key } });
+                } catch (err) {
+                    log.debug(`react failed: ${err.message}`);
+                }
+            }
+            if (out?.handled && out?.reply) await sock.sendMessage(jid, { text: out.reply });
+        }
+
         // 2. commands
         if (text.trim().startsWith('!')) {
             const parsed = parseCommand(text);
             if (!parsed) return { unknownCommand: true };
             try {
                 const out = await commands.handle(ctx);
-                // The reaction is the confirmation: it lands on the command
-                // message itself, so the group sees "done" without the bot
-                // having to say anything.
-                if (out?.react) {
-                    try {
-                        await sock.sendMessage(jid, { react: { text: out.react, key: msg.key } });
-                    } catch (err) {
-                        log.debug(`react failed: ${err.message}`);
-                    }
-                }
-                if (out?.handled && out?.reply) await sock.sendMessage(jid, { text: out.reply });
+                await deliver(out);
                 return { command: parsed.name };
             } catch (err) {
                 log.error(`command "${parsed.name}" failed: ${err.message}`);
@@ -105,10 +112,30 @@ export function createRouter({ sock, config, log, flags, guard, groups, quiz, co
             }
         }
 
-        // 3. quiz — never on our own messages. The bot's answer quotes the quiz
+        // The quiz trigger wins over a game round: a screenshot captioned
+        // "quiz" while a number game is running is still a quiz solve.
+        const wantsQuiz = !fromMe && quiz.trigger(msg, isGroup);
+
+        // 3. games — while a round is running, a bare "57" or "heads" is a
+        // guess. Uses the same deliver() so a guess confirms with a reaction.
+        if (!fromMe && !wantsQuiz) {
+            // A game that throws must never swallow a message that the quiz
+            // solver could still answer, so failures fall through.
+            try {
+                const out = await games?.handleMessage?.(ctx);
+                if (out?.handled) {
+                    await deliver(out);
+                    return { game: true };
+                }
+            } catch (err) {
+                log.warn(`game error: ${err.message}`);
+            }
+        }
+
+        // 4. quiz — never on our own messages. The bot's answer quotes the quiz
         // image, so re-processing it would solve the same quiz forever.
         if (fromMe) return { own: true };
-        if (!quiz.trigger(msg, isGroup)) return { nothing: true };
+        if (!wantsQuiz) return { nothing: true };
 
         log.info(`quiz triggered in "${ctx.chatName}" by ${ctx.senderLabel}`);
         const res = await quiz.solve(msg, { isGroup, chatName: ctx.chatName });

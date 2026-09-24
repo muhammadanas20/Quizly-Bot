@@ -123,6 +123,15 @@ export function loadConfig(env = process.env) {
         guardWhitelist  : list(env.GUARD_WHITELIST).map(normalizeId).filter(Boolean),
         seededFlags     : parseSeedFlags(env.FLAGGED_USERS),
 
+        // Games (!game, !guess, !top, …)
+        gamesEnabled    : bool(env.GAMES, true),
+        // How long a round stays open before the bot reveals the answer.
+        gameTimeoutMs   : (int(env.GAME_TIMEOUT, 180) || 180) * 1000,
+        // Breather between two rounds in the same chat, so a round cannot be
+        // farmed for participation points.
+        gameCooldownMs  : (int(env.GAME_COOLDOWN, 15) || 15) * 1000,
+        gameMaxAttempts : int(env.GAME_MAX_ATTEMPTS, 12) || 12,
+
         // Limits
         ratePerMinute   : int(env.RATE_PER_MINUTE, 12) || 12,
         ratePerDay      : int(env.RATE_PER_DAY, 800) || 800,
