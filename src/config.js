@@ -170,14 +170,18 @@ export function loadConfig(env = process.env) {
         // Linked-device identity — decides whether WhatsApp sends one-time media
         companion       : parseCompanion(env.WA_BROWSER, env.WA_BROWSER_NAME),
 
-        // Games (!game, !guess, !top, …)
+        // Games (!game, !guess, !top, …). GAMES is the initial state; owner
+        // !game on / !game stop persists an override in the score store.
         gamesEnabled    : bool(env.GAMES, true),
         // How long a round stays open before the bot reveals the answer.
         gameTimeoutMs   : (int(env.GAME_TIMEOUT, 180) || 180) * 1000,
-        // Breather between two rounds in the same chat, so a round cannot be
-        // farmed for participation points.
-        gameCooldownMs  : (int(env.GAME_COOLDOWN, 15) || 15) * 1000,
+        // Never make members wait longer than five seconds between rounds.
+        // Participation points have a separate minimum five-second window.
+        gameCooldownMs  : Math.min(int(env.GAME_COOLDOWN, 5), 5) * 1000,
         gameMaxAttempts : int(env.GAME_MAX_ATTEMPTS, 12) || 12,
+        // One bounded text-only AI request per day replaces the generated pool.
+        gameAiTriviaCount: Math.max(1, Math.min(int(env.GAME_AI_TRIVIA_COUNT, 16) || 16, 32)),
+        gameAiPuzzleCount: Math.max(1, Math.min(int(env.GAME_AI_PUZZLE_COUNT, 16) || 16, 32)),
 
         // Limits
         ratePerMinute   : int(env.RATE_PER_MINUTE, 12) || 12,
@@ -221,7 +225,7 @@ export function validateConfig(cfg) {
     }
     if (cfg.owners.length === 0) {
         warnings.push(
-            'OWNER_NUMBERS is empty — nobody will be able to run !flag / !unflag / !guard.'
+            'OWNER_NUMBERS is empty — only the bot account can use !flag / !guard / !game on / !game stop / !game reset tops.'
         );
     }
     if (!cfg.phoneNumber) {

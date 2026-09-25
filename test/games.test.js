@@ -12,12 +12,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { createGameEngine, GAMES, findGame, answerMatches, normalizeAnswer, hotCold, scrambleWord, makeMath, WORDS } from '../src/games.js';
+import { createGameEngine, GAMES, TRIVIA, findGame, answerMatches, normalizeAnswer, hotCold, scrambleWord, makeMath, WORDS } from '../src/games.js';
 import { createScoreStore } from '../src/scores.js';
 import { loadConfig } from '../src/config.js';
 import log from '../src/log.js';
 
 const GROUP = '120363000000000000@g.us';
+const OTHER = '120363000000000001@g.us';
 const PN = '923001234567';
 const PN2 = '923009876543';
 
@@ -27,7 +28,7 @@ const seq = (values) => {
     return () => values[Math.min(i++, values.length - 1)];
 };
 
-function world({ random = half, env = {}, send = null } = {}) {
+function world({ random = half, env = {}, send = null, content = null } = {}) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'games-'));
     const config = loadConfig({ GEMINI_API_KEY: 'k', OWNER_NUMBERS: PN, ...env });
     const scores = createScoreStore({ file: path.join(dir, 'scores.json'), log }).load();
@@ -41,6 +42,7 @@ function world({ random = half, env = {}, send = null } = {}) {
         log,
         scores,
         groups: { nameOf: async () => '' },
+        content,
         random,
         now,
         autoSweep: false,
@@ -111,10 +113,31 @@ test('makeMath always produces a correct problem', () => {
         for (const p of [easy, hard]) {
             assert.ok(Number.isInteger(p.answer), `${p.question} answered with ${p.answer}`);
             // eslint-disable-next-line no-eval
-            assert.equal(p.answer, eval(p.question.replace(/×/g, '*').replace(/−/g, '-')), p.question);
+            assert.equal(p.answer, eval(p.question.replace(/×/g, '*').replace(/−/g, '-').replace(/÷/g, '/')), p.question);
             assert.ok(p.points > 0);
         }
     }
+});
+
+test('hard maths uses five genuinely multi-step, exact-answer templates', () => {
+    const kinds = new Set();
+    for (let i = 0; i < 5; i++) {
+        const problem = makeMath('hard', () => (i + 0.5) / 5);
+        kinds.add(problem.question);
+        assert.equal(problem.points, 10);
+        assert.ok((problem.question.match(/[+×−÷]/g) || []).length >= 3, problem.question);
+        // eslint-disable-next-line no-eval
+        assert.equal(eval(problem.question.replace(/×/g, '*').replace(/−/g, '-').replace(/÷/g, '/')), problem.answer);
+    }
+    assert.equal(kinds.size, 5);
+});
+
+test('built-in trivia and scramble pools have varied, non-duplicated fallbacks', () => {
+    assert.ok(TRIVIA.length >= 80);
+    assert.ok(WORDS.length >= 100);
+    assert.equal(new Set(TRIVIA.map((e) => e.q.toLowerCase())).size, TRIVIA.length);
+    assert.equal(new Set(WORDS).size, WORDS.length);
+    assert.ok(TRIVIA.every((entry) => entry.a.length > 0));
 });
 
 test('every advertised game can be started by its canonical name', () => {
@@ -311,6 +334,17 @@ test('!game math asks a random sum and the first right answer takes it', async (
     assert.match(win.reply, new RegExp(`the answer was \\*${round.answer}\\*`));
 });
 
+test('!game math hard awards ten points for a multi-step problem', async () => {
+    const { games, scores } = world({ random: () => 0.7 });
+    const start = await games.handle(asAli('!game math hard'), ['math', 'hard']);
+    const round = games.active(GROUP);
+    assert.match(start.reply, /Maths\* \(hard\)/);
+    assert.match(round.problem.question, /÷/);
+    const win = await games.guess(asAli(`!guess ${round.answer}`), [String(round.answer)]);
+    assert.match(win.reply, /\*\+10\* pts/);
+    assert.equal(scores.playerOf(GROUP, [PN]).points, 11);
+});
+
 test('!game scramble: a plain single word is a guess', async () => {
     const { games } = world();
     const start = await games.handle(asAli('!game scramble'), ['scramble']);
@@ -356,6 +390,36 @@ test('a member-contributed question can be drawn for a round', async () => {
 
     const win = await games.handleMessage(asSana('tokyo'));
     assert.match(win.reply, /wins/);
+});
+
+test('trivia and scramble use the latest AI pool; an active round keeps its original answer', async () => {
+    let trivia = [{ q: 'What instrument measures air pressure?', a: ['barometer'] }];
+    let puzzles = [{ word: 'metronome', clue: 'Keeps the rhythm for musicians' }];
+    const content = {
+        questions: () => trivia, puzzles: () => puzzles,
+        get questionCount() { return trivia.length; },
+        get puzzleCount() { return puzzles.length; }
+    };
+    const { games, tick, config } = world({ random: () => 0.999, content });
+    const first = await games.handle(asAli('!game trivia'), ['trivia']);
+    assert.match(first.reply, /air pressure/);
+    trivia = [{ q: 'Which planet is known for its rings?', a: ['saturn'] }];
+    assert.equal(games.active(GROUP).accepted[0], 'barometer', 'in-flight round is not rewritten');
+    await games.guess(asAli('!guess barometer'), ['barometer']);
+    tick(config.gameCooldownMs + 1);
+    await games.handle(asAli('!game trivia'), ['trivia']);
+    assert.equal(games.active(GROUP).accepted[0], 'saturn', 'the next round sees the replacement');
+    await games.handle(asAli('!game end'), ['end']);
+    tick(config.gameCooldownMs + 1);
+
+    const opening = await games.handle(asAli('!game scramble'), ['scramble']);
+    assert.match(opening.reply, /Clue: Keeps the rhythm/);
+    assert.equal(games.active(GROUP).answer, 'metronome');
+    puzzles = [{ word: 'stethoscope', clue: 'Used by doctors to listen to a heartbeat' }];
+    await games.handle(asAli('!game end'), ['end']);
+    tick(config.gameCooldownMs + 1);
+    await games.handle(asAli('!game scramble'), ['scramble']);
+    assert.equal(games.active(GROUP).answer, 'stethoscope');
 });
 
 test('!game addq needs a question and an answer, and refuses duplicates', async () => {
@@ -450,10 +514,20 @@ test('only the starter or the owner can stop a round', async () => {
     assert.equal(refused.react, '⛔');
     assert.match(refused.reply, /Only Ali/);
 
-    const owner = await games.handle(asSana('!game stop', { isOwner: true }), ['stop']);
+    // Owners use !game end for one chat; !game stop is now the GLOBAL shutoff.
+    const owner = await games.handle(asSana('!game end', { isOwner: true }), ['end']);
     assert.equal(owner.react, '🛑');
     assert.match(owner.reply, /the number was \*51\*/);
     assert.equal(games.active(GROUP), null);
+});
+
+test('the starter can still stop only their own round without disabling games', async () => {
+    const { games } = world();
+    await games.handle(asAli('!game dice'), ['dice']);
+    const stopped = await games.handle(asAli('!game stop'), ['stop']);
+    assert.match(stopped.reply, /the die was/);
+    assert.equal(games.enabled, true);
+    assert.equal(games.roundCount, 0);
 });
 
 test('a stranger cannot replace a running round, the starter can', async () => {
@@ -549,4 +623,124 @@ test('the leaderboard survives a restart', async () => {
     const reopened = createScoreStore({ file: path.join(dir, 'scores.json') }).load();
     assert.equal(reopened.board(GROUP)[0].name, 'Ali');
     assert.equal(reopened.board(GROUP)[0].points, 11);
+});
+
+// ── global owner controls ────────────────────────────────────────────────────
+test('!game stop by the owner cancels ALL chats without drawing winners, and !game on restores play', async () => {
+    const sent = [];
+    const { games, scores, dir } = world({ send: async (jid, text) => sent.push({ jid, text }) });
+    await games.handle(asAli('!game number'), ['number']);
+    await games.handle(asSana('!game lucky', { jid: OTHER }), ['lucky']);
+    assert.equal(games.roundCount, 2);
+    assert.equal(scores.playerOf(OTHER, [PN2]).points, 1, 'joining earns a participation point');
+
+    for (const [cmd, args] of [['on', ['on']], ['reset tops', ['reset', 'tops']]]) {
+        const denied = await games.handle(asSana(`!game ${cmd}`), args);
+        assert.equal(denied.react, '⛔');
+    }
+    assert.equal(scores.playerCount, 1);
+
+    const stopped = await games.handle(asAli('!game stop', { isOwner: true }), ['stop']);
+    assert.equal(stopped.react, '🛑');
+    assert.match(stopped.reply, /2 active round\(s\) cancelled/);
+    assert.equal(games.roundCount, 0);
+    assert.equal(games.enabled, false);
+    assert.equal(scores.playerOf(OTHER, [PN2]).wins, 0, 'no lucky winner on cancellation');
+    assert.deepEqual(sent.map((s) => s.jid), [OTHER], 'other groups are notified once');
+    assert.match(sent[0].text, /cancelled/);
+
+    assert.match((await games.handle(asSana('!game number'), ['number'])).reply, /Games are OFF/);
+    assert.match((await games.guess(asSana('!guess 51'), ['51'])).reply, /Games are OFF/);
+    assert.match((await games.join(asSana('!in'))).reply, /Games are OFF/);
+    assert.match((await games.handle(asSana('!game addq A question? ; An answer'), ['addq', 'A question?', ';', 'An answer'])).reply, /Games are OFF/);
+    assert.deepEqual(await games.handleMessage(asSana('51')), { handled: false });
+    assert.match((await games.handle(asSana('!game status'), ['status'])).reply, /Games: \*OFF\*/);
+    assert.match(games.board(asSana('!top', { jid: OTHER })), /Sana/, 'existing board remains readable');
+
+    const disk = createScoreStore({ file: path.join(dir, 'scores.json') }).load();
+    assert.equal(disk.gamesEnabled(true), false, 'switch survives a restart');
+    assert.equal((await games.handle(asAli('!game on', { isOwner: true }), ['on'])).react, '✅');
+    assert.equal(games.enabled, true);
+    assert.match((await games.handle(asSana('!game dice'), ['dice'])).reply, /Dice/);
+});
+
+test('!game reset tops clears all leaderboards but keeps questions and game settings', async () => {
+    const { games, scores, dir } = world();
+    scores.win(GROUP, { ids: [PN], name: 'Ali' }, 10);
+    scores.win(OTHER, { ids: [PN2], name: 'Sana' }, 6);
+    scores.addQuestion({ q: 'Which instrument plays with a bow?', a: ['violin'], by: 'Ali', byKey: PN });
+    await games.handle(asAli('!game math'), ['math']);
+    assert.equal(games.roundCount, 1);
+
+    const denied = await games.handle(asSana('!game reset tops'), ['reset', 'tops']);
+    assert.equal(denied.react, '⛔');
+    assert.equal(scores.boardAll().length, 2);
+    assert.match((await games.handle(asAli('!game reset', { isOwner: true }), ['reset'])).reply, /Usage/);
+    assert.equal(scores.boardAll().length, 2);
+
+    const reset = await games.handle(asAli('!game reset tops', { isOwner: true }), ['reset', 'tops']);
+    assert.equal(reset.react, '✅');
+    assert.match(reset.reply, /All leaderboards reset/);
+    assert.equal(scores.boardAll().length, 0);
+    assert.equal(games.roundCount, 0);
+    assert.equal(scores.questionCount, 1);
+    assert.equal(games.enabled, true);
+    assert.deepEqual(await games.handleMessage(asAli('51')), { handled: false }, 'old guess cannot score');
+    const disk = createScoreStore({ file: path.join(dir, 'scores.json') }).load();
+    assert.equal(disk.playerCount, 0);
+    assert.equal(disk.questionCount, 1);
+    await games.handle(asAli('!game dice'), ['dice']);
+    await games.guess(asAli('!guess 4'), ['4']);
+    assert.equal(scores.board(GROUP)[0].points, 7, 'new scores start from zero');
+});
+
+test('GAMES=off is an initial setting: owner can enable it and the override persists', async () => {
+    const { games, scores, config, dir } = world({ env: { GAMES: 'off' } });
+    assert.equal(games.enabled, false);
+    assert.match((await games.handle(asSana('!game number'), ['number'])).reply, /Games are OFF/);
+    assert.equal((await games.handle(asSana('!game on'), ['on'])).react, '⛔');
+    await games.handle(asAli('!game on', { isOwner: true }), ['on']);
+    assert.equal(games.enabled, true);
+
+    const saved = createScoreStore({ file: path.join(dir, 'scores.json') }).load();
+    const restarted = createGameEngine({ config, scores: saved, autoSweep: false });
+    assert.equal(restarted.enabled, true, 'persisted override wins over .env GAMES=off');
+    await restarted.handle(asAli('!game stop', { isOwner: true }), ['stop']);
+    assert.equal(createScoreStore({ file: path.join(dir, 'scores.json') }).load().gamesEnabled(true), false);
+    assert.equal(scores.gamesEnabled(true), true, 'stores in different processes have independent in-memory state');
+});
+
+test('a pending start or guess cannot award points after a global stop/reset', async () => {
+    const { games, scores } = world();
+    let release;
+    const waiting = new Promise((resolve) => { release = resolve; });
+    const delayed = (text) => ({ ...asAli(text), groups: { nameOf: async () => { await waiting; return 'Ali'; } } });
+    const starting = games.handle(delayed('!game number'), ['number']);
+    await Promise.resolve();
+    await games.handle(asSana('!game stop', { isOwner: true }), ['stop']);
+    release();
+    assert.match((await starting).reply, /Games are OFF/);
+    assert.equal(games.roundCount, 0);
+
+    await games.handle(asSana('!game on', { isOwner: true }), ['on']);
+    await games.handle(asAli('!game number'), ['number']);
+    let releaseGuess;
+    const pending = new Promise((resolve) => { releaseGuess = resolve; });
+    const guessing = games.guess({ ...asAli('!guess 51'), groups: { nameOf: async () => { await pending; return 'Ali'; } } }, ['51']);
+    await Promise.resolve();
+    await games.handle(asSana('!game reset tops', { isOwner: true }), ['reset', 'tops']);
+    releaseGuess();
+    assert.match((await guessing).reply, /ended/);
+    assert.equal(scores.playerCount, 0);
+
+    let releaseStart;
+    const held = new Promise((resolve) => { releaseStart = resolve; });
+    const startedBeforeReset = games.handle({
+        ...asAli('!game dice'), groups: { nameOf: async () => { await held; return 'Ali'; } }
+    }, ['dice']);
+    await Promise.resolve();
+    await games.handle(asSana('!game reset tops', { isOwner: true }), ['reset', 'tops']);
+    releaseStart();
+    assert.match((await startedBeforeReset).reply, /cancelled while starting/);
+    assert.equal(games.roundCount, 0);
 });

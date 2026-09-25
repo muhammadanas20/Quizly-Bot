@@ -9,7 +9,8 @@
  *   !quiz                                anyone (solve attached/quoted image now)
  *   !ping  !stats                        anyone
  *
- *   !game [list|help|top|me|stop|addq|name]  anyone — the game engine (games.js)
+ *   !game [list|help|top|me|end|addq|name]   anyone — the game engine (games.js)
+ *   !game on|stop|reset tops                owner — global game controls
  *   !guess <answer>  !in  !top               anyone — those games' shortcuts
  *   !random !roll !flip !pick !shuffle !8ball  anyone — instant randomness
  *
@@ -85,7 +86,8 @@ export const HELP_TEXT = [
     `${PREFIX}in                     join a lucky draw`,
     `${PREFIX}top                    leaderboard of this chat (${PREFIX}top all = global)`,
     `${PREFIX}game me                your own score card`,
-    `${PREFIX}game stop              end the round in play`,
+    `${PREFIX}game end               starter: end this chat’s round`,
+    `${PREFIX}game status            games on/off + daily content`,
     `${PREFIX}game addq Q ; A        add your own trivia question`,
     '```',
     '*Random*',
@@ -107,6 +109,9 @@ export const HELP_TEXT = [
     `${PREFIX}unflag <@person>       remove a flag`,
     `${PREFIX}flags                  list flagged members`,
     `${PREFIX}guard on|off|status    toggle the media guard`,
+    `${PREFIX}game on                open all games for members`,
+    `${PREFIX}game stop              stop every active game and turn games off`,
+    `${PREFIX}game reset tops        reset ALL leaderboards (keeps questions)`,
     '```',
     '',
     'The guard never replies in the group — flagged stickers and photos just disappear.'
@@ -204,7 +209,7 @@ export function createCommandHandler({ config, flags, log, guard, limiter, group
                         `AI calls: ${rate.minute}/${rate.perMinute} this minute · ${rate.day}/${rate.perDay} today`,
                         top.length ? `Top offenders: ${top.map(([n, c]) => `${n} (${c})`).join(', ')}` : null,
                         games
-                            ? `Games: ${scores?.playerCount ?? 0} player(s) on the board · ${scores?.questionCount ?? 0} trivia question(s)`
+                            ? `Games: ${games.enabled ? 'ON' : 'OFF'} · ${scores?.playerCount ?? 0} player(s) on the board · ${scores?.questionCount ?? 0} member trivia question(s)`
                             : 'Games: OFF',
                         `Memory: ${mem} MB · uptime ${uptime()}`
                     ].filter(Boolean).join('\n')
@@ -316,8 +321,8 @@ export function createCommandHandler({ config, flags, log, guard, limiter, group
             }
 
             // ── games ────────────────────────────────────────────────────────
-            // Every one of these belongs to everyone, not just the owner: the
-            // whole point is a group that plays together and keeps score.
+            // Members play and view scores; games.handle checks owner status
+            // for global on/stop/reset subcommands (never trust the prefix).
             case 'game':
                 if (!games) return NO_GAMES;
                 return await games.handle(ctx, cmd.args);

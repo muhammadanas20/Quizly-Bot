@@ -15,7 +15,7 @@ export class AiError extends Error {
         this.provider  = provider;
         this.model     = model;
         this.retryable = retryable;
-        this.kind      = kind; // 'auth' | 'rate' | 'model' | 'bad_request' | 'server' | 'network' | 'timeout' | 'unknown'
+        this.kind      = kind; // 'auth' | 'rate' | 'model' | 'bad_response' | 'cancelled' | 'timeout' | …
     }
 }
 
@@ -45,7 +45,7 @@ export function readErrorBody(json, fallbackText) {
  * POST JSON with a hard timeout.
  * @returns {Promise<{status:number, json:any, text:string}>}
  */
-export async function postJson(url, { headers, body, timeoutMs = 60000, fetchImpl } = {}) {
+export async function postJson(url, { headers, body, timeoutMs = 60000, fetchImpl, signal } = {}) {
     const doFetch = fetchImpl || globalThis.fetch;
     if (typeof doFetch !== 'function') {
         throw new AiError('global fetch is unavailable — Node 18+ is required', { kind: 'network' });
@@ -59,7 +59,7 @@ export async function postJson(url, { headers, body, timeoutMs = 60000, fetchImp
             method : 'POST',
             headers: { 'content-type': 'application/json', ...headers },
             body   : JSON.stringify(body),
-            signal : controller.signal
+            signal : signal ? AbortSignal.any([controller.signal, signal]) : controller.signal
         });
 
         const text = await res.text();
@@ -67,6 +67,7 @@ export async function postJson(url, { headers, body, timeoutMs = 60000, fetchImp
         try { json = text ? JSON.parse(text) : null; } catch { /* non-JSON body */ }
         return { status: res.status, json, text };
     } catch (err) {
+        if (signal?.aborted) throw new AiError('request cancelled', { kind: 'cancelled' });
         if (err?.name === 'AbortError') {
             throw new AiError(`timed out after ${timeoutMs}ms`, { kind: 'timeout', retryable: true });
         }
@@ -108,12 +109,12 @@ export function withoutPath(obj, path) {
  * "generationConfig.thinkingConfig".
  * Returns the successful { status, json, text } or the last failing response.
  */
-export async function postJsonWithFallbacks(url, { headers, body, dropFields = [], timeoutMs, fetchImpl, maxRetries = dropFields.length }) {
+export async function postJsonWithFallbacks(url, { headers, body, dropFields = [], timeoutMs, fetchImpl, signal, maxRetries = dropFields.length }) {
     let current = body;
     let last = null;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        const res = await postJson(url, { headers, body: current, timeoutMs, fetchImpl });
+        const res = await postJson(url, { headers, body: current, timeoutMs, fetchImpl, signal });
         if (res.status < 400) return res;
 
         last = res;

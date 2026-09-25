@@ -31,6 +31,7 @@ import { createInstanceLock } from './lock.js';
 import { companionBrowser } from './config.js';
 import { createScoreStore } from './scores.js';
 import { createGameEngine } from './games.js';
+import { createGameContentStore } from './game-content.js';
 import { createRandomTools } from './random.js';
 
 const RECONNECT_BASE_MS = 3000;
@@ -113,18 +114,15 @@ export async function startBot({
     });
 
     // ── games ────────────────────────────────────────────────────────────────
-    // Rounds live in memory; only the scores are persisted. The engine announces
-    // a round that timed out through this socket wrapper, so a finished game
-    // still gets its reveal while nobody is typing.
-    const games = config.gamesEnabled
-        ? createGameEngine({
-            config,
-            log,
-            scores,
-            groups,
-            send: (jid, text) => sockApi.sendMessage(jid, { text })
-        })
-        : null;
+    // The engine exists even when GAMES=off, so the owner can turn it on from
+    // WhatsApp. Only scores/settings and a bounded daily AI pool touch disk.
+    const content = createGameContentStore({
+        file: `${config.dataDir}/game-content.json`, config, log, fetchImpl, scores
+    }).load();
+    const games = createGameEngine({
+        config, log, scores, groups, content,
+        send: (jid, text) => sockApi.sendMessage(jid, { text })
+    });
 
     const commands = createCommandHandler({
         config, flags, log, guard, limiter, groups, games, scores, startedAt,
@@ -222,7 +220,8 @@ export async function startBot({
                     log.raw('     devices — those are still revoked from the raw stanza; WA_BROWSER=android');
                     log.raw('     (pair again) makes WhatsApp send the media too.');
                 }
-                log.raw(`  🎮  games    : ${games ? `ON (${config.gameTimeoutMs / 1000}s rounds, ${scores.playerCount} players on the board)` : 'OFF'}`);
+                log.raw(`  🎮  games    : ${games.enabled ? 'ON' : 'OFF'} (${config.gameTimeoutMs / 1000}s rounds, ${config.gameCooldownMs / 1000}s between, ${scores.playerCount} players)`);
+                log.raw(`  📚  daily AI : ${content.questionCount} trivia · ${content.puzzleCount} puzzles`);
                 log.raw(`  🧠  ai       : ${config.aiOrder.filter((p) => config[p]?.key).join(' → ')}`);
                 log.raw(`  💾  memory   : ${mem} MB RSS`);
                 log.raw('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
@@ -302,7 +301,8 @@ export async function startBot({
         log.warn(`shutting down (${reason})`);
         flags.flush();
         scores.flush();
-        games?.close();
+        games.close();
+        content.close();
         try { await sock?.end?.(); } catch { /* ignore */ }
         lock.release();         // free the session for the next copy
         if (exit) setTimeout(() => process.exit(0), 300).unref?.();
@@ -326,12 +326,14 @@ export async function startBot({
         await lock.acquire({ isStopped: () => stopped });
     }
     await connect();
+    if (!stopped && games.enabled) content.start(); // never delay WhatsApp or the guard on AI
 
     return {
         get socket() { return sock; },
         flags,
         scores,
         games,
+        content,
         guard,
         groups,
         limiter,

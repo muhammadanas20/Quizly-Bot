@@ -12,12 +12,12 @@ import { GEMINI_RESPONSE_SCHEMA } from './prompt.js';
 
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 
-export function buildGeminiBody({ model, image, prompt, maxTokens, thinkingBudget }) {
+export function buildGeminiBody({ model, image, prompt, maxTokens, thinkingBudget, responseSchema = GEMINI_RESPONSE_SCHEMA }) {
     const generationConfig = {
         temperature       : 0.1,
         maxOutputTokens   : maxTokens,
         responseMimeType  : 'application/json',
-        responseSchema    : GEMINI_RESPONSE_SCHEMA
+        responseSchema
     };
 
     // thinkingConfig is only valid on the 2.5 generation; sending it to other
@@ -30,7 +30,7 @@ export function buildGeminiBody({ model, image, prompt, maxTokens, thinkingBudge
         contents: [{
             role : 'user',
             parts: [
-                { inline_data: { mime_type: image.mimeType, data: image.data } },
+                ...(image ? [{ inline_data: { mime_type: image.mimeType, data: image.data } }] : []),
                 { text: prompt }
             ]
         }],
@@ -38,16 +38,17 @@ export function buildGeminiBody({ model, image, prompt, maxTokens, thinkingBudge
     };
 }
 
-export async function callGemini({ apiKey, model, image, prompt, timeoutMs, maxTokens, thinkingBudget = 0, fetchImpl }) {
+export async function callGemini({ apiKey, model, image, prompt, timeoutMs, maxTokens, thinkingBudget = 0, responseSchema, fetchImpl, signal }) {
     const url = `${ENDPOINT}/${encodeURIComponent(model)}:generateContent`;
 
     const res = await postJsonWithFallbacks(url, {
         headers    : { 'x-goog-api-key': apiKey },
-        body       : buildGeminiBody({ model, image, prompt, maxTokens, thinkingBudget }),
+        body       : buildGeminiBody({ model, image, prompt, maxTokens, thinkingBudget, responseSchema }),
         // newest / least-supported knobs get dropped first if the API 400s
         dropFields : ['generationConfig.thinkingConfig', 'generationConfig.responseSchema'],
         timeoutMs,
-        fetchImpl
+        fetchImpl,
+        signal
     });
 
     if (res.status >= 400) {

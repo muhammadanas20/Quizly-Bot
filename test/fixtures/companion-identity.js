@@ -25,6 +25,7 @@ let browser = null;
 const bot = await startBot({
     config,
     log,
+    fetchImpl: async () => ({ status: 503, text: async () => '{"error":{"message":"offline test"}}' }),
     authStateFactory: async () => ({ state: {}, saveCreds: async () => {} }),
     socketFactory: (opts) => {
         browser = opts.browser;

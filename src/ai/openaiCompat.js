@@ -18,10 +18,12 @@ export function buildChatBody({ model, image, prompt, maxTokens, extras = {} }) 
         model,
         messages: [{
             role   : 'user',
-            content: [
-                { type: 'text',      text: prompt },
-                { type: 'image_url', image_url: { url: `data:${image.mimeType};base64,${image.data}` } }
-            ]
+            content: image
+                ? [
+                    { type: 'text', text: prompt },
+                    { type: 'image_url', image_url: { url: `data:${image.mimeType};base64,${image.data}` } }
+                ]
+                : prompt
         }],
         temperature    : 0.1,
         max_tokens     : maxTokens,
@@ -32,7 +34,7 @@ export function buildChatBody({ model, image, prompt, maxTokens, extras = {} }) 
 }
 
 export async function callOpenAICompat({
-    name, apiKey, model, image, prompt, timeoutMs, maxTokens, extras = {}, fetchImpl
+    name, apiKey, model, image, prompt, timeoutMs, maxTokens, extras = {}, fetchImpl, signal
 }) {
     const baseUrl = PROVIDERS[name]?.baseUrl;
     if (!baseUrl) throw new AiError(`unknown provider "${name}"`, { provider: name, model, kind: 'unknown' });
@@ -44,7 +46,8 @@ export async function callOpenAICompat({
         // least essential one and retry rather than failing the whole quiz
         dropFields : ['reasoning_effort', 'response_format'],
         timeoutMs,
-        fetchImpl
+        fetchImpl,
+        signal
     });
 
     if (res.status >= 400) {

@@ -166,6 +166,38 @@ test('scores and questions survive a restart', () => {
     assert.equal(reopened.questionCount, 1);
 });
 
+test('owner game switch and reset survive restarts without losing member questions', () => {
+    const { store, file } = world();
+    store.award(GROUP, { ids: [PN, LID], name: 'Ali' }, 9);
+    store.award(OTHER, { ids: [PN2], name: 'Sana' }, 4);
+    store.addQuestion({ q: 'What is the capital of Australia?', a: ['Canberra'], byKey: PN });
+    assert.equal(store.gamesEnabled(true), true);
+    assert.equal(store.gamesEnabled(false), false, 'old files use the .env default');
+    assert.equal(store.setGamesEnabled(false), true);
+    assert.equal(createScoreStore({ file }).load().gamesEnabled(true), false);
+
+    const reset = store.resetBoards();
+    assert.deepEqual(reset, { players: 2, saved: true });
+    assert.equal(store.playerCount, 0);
+    assert.equal(store.keyOf(GROUP, [LID]), LID, 'old aliases were removed too');
+    assert.equal(store.questionCount, 1, 'member questions are NOT reset');
+    const reopened = createScoreStore({ file }).load();
+    assert.deepEqual(reopened.boardAll(), []);
+    assert.equal(reopened.gamesEnabled(true), false);
+    assert.equal(reopened.questions()[0].byKey, PN);
+    assert.equal(fs.existsSync(`${file}.tmp`), false, 'writes replace the file atomically');
+});
+
+test('a v1 scoreboard still loads and can be controlled', () => {
+    const { file } = world();
+    fs.writeFileSync(file, JSON.stringify({ version: 1, chats: {}, questions: [{ q: 'Capital of Egypt?', a: ['Cairo'] }] }));
+    const store = createScoreStore({ file }).load();
+    assert.equal(store.questionCount, 1);
+    assert.equal(store.gamesEnabled(false), false);
+    store.setGamesEnabled(true);
+    assert.equal(createScoreStore({ file }).load().gamesEnabled(false), true);
+});
+
 test('a corrupt file is not fatal', () => {
     const { file } = world();
     fs.writeFileSync(file, '{ this is not json');

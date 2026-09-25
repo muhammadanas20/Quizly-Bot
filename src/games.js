@@ -6,7 +6,10 @@
  *   !guess <answer> / !g       take a shot (plain replies work too)
  *   !in / !join                join the lucky draw
  *   !game draw                 pick the lucky winner early
- *   !game stop                 end the current round (starter or owner)
+ *   !game stop                 owner: stop ALL games; starter: end this round
+ *   !game on                   owner: reopen games for everyone
+ *   !game reset tops           owner: clear every leaderboard
+ *   !game end                  end this chat's round (starter or owner)
  *   !game top [all]            leaderboard — this chat, or everywhere
  *   !game me                   your own score card
  *   !game addq Q ; A           contribute a trivia question to the pool
@@ -33,8 +36,36 @@ export const WORDS = Object.freeze([
     'engine', 'flower', 'guitar', 'hunter', 'island', 'jungle', 'kitten', 'ladder',
     'monkey', 'nature', 'ocean', 'pencil', 'queen', 'rabbit', 'school', 'tiger',
     'umbrella', 'village', 'wizard', 'zebra', 'bottle', 'castle', 'dragon', 'elephant',
-    'family', 'holiday', 'insect', 'jacket', 'kitchen', 'lemon', 'mirror', 'number'
+    'family', 'holiday', 'insect', 'jacket', 'kitchen', 'lemon', 'mirror', 'number',
+    'anchor', 'balloon', 'compass', 'eclipse', 'feather', 'galaxy', 'harvest',
+    'journey', 'lantern', 'meadow', 'notebook', 'orchard', 'passport', 'quarter',
+    'recycle', 'shelter', 'thunder', 'uniform', 'volcano', 'whisper', 'battery',
+    'coconut', 'emerald', 'fountain', 'glacier', 'horizon', 'library', 'mystery',
+    'outline', 'penguin', 'rainbow', 'sapphire', 'tornado', 'victory', 'waterfall',
+    'backpack', 'chocolate', 'dolphin', 'festival', 'gravity', 'keyboard',
+    'lighthouse', 'mountain', 'necklace', 'painting', 'sandwich', 'telescope',
+    'calendar', 'airplane', 'treasure', 'triangle', 'universe', 'windmill',
+    'accordion', 'blueprint', 'cinnamon', 'microphone', 'strawberry', 'firework',
+    'snowflake', 'pineapple', 'sunflower', 'adventure', 'parachute', 'tangerine',
+    'calculator', 'astronaut', 'porcupine'
 ]);
+
+// A clue makes the longer built-in words fair; AI puzzles carry their own.
+const WORD_CLUES = Object.freeze({
+    compass: 'Tool used to find north', eclipse: 'When one celestial body blocks another',
+    galaxy: 'A vast system of stars', lantern: 'A portable light',
+    orchard: 'A place where fruit trees grow', passport: 'Document used for international travel',
+    recycle: 'Turn used materials into new ones', volcano: 'Mountain that can erupt',
+    glacier: 'A slow-moving mass of ice', penguin: 'Flightless bird from cold regions',
+    rainbow: 'Colourful arc seen after rain', waterfall: 'River plunging over a ledge',
+    backpack: 'Bag carried on your shoulders', keyboard: 'Keys used to type',
+    lighthouse: 'Tower guiding ships at night', telescope: 'Used to look at distant stars',
+    calendar: 'Shows dates and months', triangle: 'A shape with three sides',
+    windmill: 'Structure that turns in the wind', microphone: 'Device that picks up sound',
+    strawberry: 'Small red berry with seeds outside', parachute: 'Slows a fall through the air',
+    astronaut: 'Person trained to travel in space', calculator: 'Device for working out sums'
+});
+const BUILTIN_PUZZLES = WORDS.map((word) => ({ word, clue: WORD_CLUES[word] || '' }));
 
 // ─── Built-in trivia pool (members can add more with !game addq) ─────────────
 export const TRIVIA = Object.freeze([
@@ -50,10 +81,10 @@ export const TRIVIA = Object.freeze([
     { q: 'How many sides does a hexagon have?', a: ['6', 'six'] },
     { q: 'Which country is the home of pizza?', a: ['italy'] },
     { q: 'What is the currency of Japan?', a: ['yen', 'the yen', 'japanese yen'] },
-    { q: 'Which is the longest river in the world?', a: ['nile', 'the nile', 'river nile'] },
+    { q: 'Which river flows through Cairo?', a: ['nile', 'the nile', 'river nile'] },
     { q: 'How many players from one football team are on the pitch?', a: ['11', 'eleven'] },
     { q: 'What is 7 × 8?', a: ['56', 'fifty six'] },
-    { q: 'Which month has 28 days (at least)?', a: ['february'] },
+    { q: 'Which month has exactly 28 days in a non-leap year?', a: ['february'] },
     { q: 'At what temperature does water boil at sea level, in Celsius?', a: ['100', 'one hundred'] },
     { q: 'Which animal is called the ship of the desert?', a: ['camel', 'the camel'] },
     { q: 'How many minutes are there in an hour?', a: ['60', 'sixty'] },
@@ -70,10 +101,56 @@ export const TRIVIA = Object.freeze([
     { q: 'At what temperature does water freeze, in Celsius?', a: ['0', 'zero'] },
     { q: 'How many bones does an adult human body have?', a: ['206', 'two hundred and six'] },
     { q: 'What is the tallest animal in the world?', a: ['giraffe', 'the giraffe'] },
-    { q: 'Which country has the most people?', a: ['india'] },
+    { q: 'Which country is home to the city of Mumbai?', a: ['india'] },
     { q: 'What is the hardest natural substance?', a: ['diamond'] },
     { q: 'How many strings does a standard guitar have?', a: ['6', 'six'] },
-    { q: 'Which sea creature has eight arms?', a: ['octopus', 'the octopus'] }
+    { q: 'Which sea creature has eight arms?', a: ['octopus', 'the octopus'] },
+    { q: 'Which planet is closest to the Sun?', a: ['mercury'] },
+    { q: 'What is the largest planet in our solar system?', a: ['jupiter'] },
+    { q: 'Which planet is famous for its rings?', a: ['saturn'] },
+    { q: 'What is the chemical formula for water?', a: ['h2o'] },
+    { q: 'Which gas makes up most of Earth’s atmosphere?', a: ['nitrogen'] },
+    { q: 'What process lets plants make food from sunlight?', a: ['photosynthesis'] },
+    { q: 'How many degrees are in a right angle?', a: ['90', 'ninety'] },
+    { q: 'How many sides does an octagon have?', a: ['8', 'eight'] },
+    { q: 'How many faces does a cube have?', a: ['6', 'six'] },
+    { q: 'What is the square root of 144?', a: ['12', 'twelve'] },
+    { q: 'What is the next prime number after 7?', a: ['11', 'eleven'] },
+    { q: 'What is the Roman numeral for 50?', a: ['l'] },
+    { q: 'What is the longest side of a right triangle called?', a: ['hypotenuse'] },
+    { q: 'How many millimetres are in one centimetre?', a: ['10', 'ten'] },
+    { q: 'What is the capital of Japan?', a: ['tokyo'] },
+    { q: 'What is the capital of Canada?', a: ['ottawa'] },
+    { q: 'What is the capital of Australia?', a: ['canberra'] },
+    { q: 'What is the capital of Egypt?', a: ['cairo'] },
+    { q: 'Which country is home to the Taj Mahal?', a: ['india'] },
+    { q: 'Which mountain is highest above sea level?', a: ['mount everest', 'everest'] },
+    { q: 'Which continent contains most of the Amazon rainforest?', a: ['south america'] },
+    { q: 'Which ocean lies between Africa and Australia?', a: ['indian ocean', 'the indian ocean'] },
+    { q: 'Which desert covers much of northern Africa?', a: ['sahara', 'sahara desert'] },
+    { q: 'Who wrote Romeo and Juliet?', a: ['william shakespeare', 'shakespeare'] },
+    { q: 'Who painted the Mona Lisa?', a: ['leonardo da vinci', 'da vinci'] },
+    { q: 'In which sport is a shuttlecock used?', a: ['badminton'] },
+    { q: 'How many players from one basketball team play on court at once?', a: ['5', 'five'] },
+    { q: 'Which sport uses a bat and a wicket?', a: ['cricket'] },
+    { q: 'Which musical instrument has black and white keys?', a: ['piano'] },
+    { q: 'What does CPU stand for?', a: ['central processing unit'] },
+    { q: 'What does HTML stand for?', a: ['hypertext markup language'] },
+    { q: 'What is the SI unit of electric current?', a: ['ampere', 'amp'] },
+    { q: 'What is the centre of an atom called?', a: ['nucleus'] },
+    { q: 'What force pulls objects toward Earth?', a: ['gravity'] },
+    { q: 'Which organ pumps blood around the human body?', a: ['heart', 'the heart'] },
+    { q: 'How many chambers does a human heart have?', a: ['4', 'four'] },
+    { q: 'What is the largest organ of the human body?', a: ['skin', 'the skin'] },
+    { q: 'Which element makes up most of the Sun by mass?', a: ['hydrogen'] },
+    { q: 'What is a plant-eating animal called?', a: ['herbivore', 'a herbivore'] },
+    { q: 'Which year did humans first land on the Moon?', a: ['1969'] },
+    { q: 'Who described the three laws of motion?', a: ['isaac newton', 'newton'] },
+    { q: 'How many letters are in the English alphabet?', a: ['26', 'twenty six'] },
+    { q: 'What is a baby frog called?', a: ['tadpole', 'a tadpole'] },
+    { q: 'What is the capital of Nepal?', a: ['kathmandu'] },
+    { q: 'Which planet is often called the Morning Star?', a: ['venus'] },
+    { q: 'What is the frozen form of water called?', a: ['ice'] }
 ]);
 
 /** Winner points per game. A round can be lost, never the scoreboard. */
@@ -126,7 +203,7 @@ export const GAMES = Object.freeze([
         name: 'math', aliases: ['math', 'maths', 'sum', 'calc'], emoji: '➗', mode: 'race',
         title: 'Maths', points: GAME_POINTS.math,
         how: '!game math [hard] → send the answer',
-        blurb: 'A random sum, easy or hard. First correct answer takes 5-8 pts.'
+        blurb: 'Easy sums or multi-step hard problems. First correct answer takes 5-10 pts.'
     },
     {
         name: 'scramble', aliases: ['scramble', 'word', 'unscramble', 'anagram'], emoji: '🔤', mode: 'race',
@@ -232,18 +309,43 @@ export function scrambleWord(word, random = Math.random) {
 }
 
 /**
- * A random arithmetic problem. easy = one operation, hard = two operations.
+ * A random arithmetic problem. Hard mode has several multi-step templates,
+ * including exact division (never a rounded/ambiguous answer).
  * @returns {{question:string, answer:number, level:'easy'|'hard', points:number}}
  */
 export function makeMath(level = 'easy', random = Math.random) {
     if (level === 'hard') {
-        const a = randomInt(2, 12, random);
-        const b = randomInt(2, 12, random);
-        const c = randomInt(2, 20, random);
-        if (random() < 0.5) {
-            return { question: `${a} × ${b} + ${c}`, answer: a * b + c, level, points: 8 };
+        const kind = randomInt(0, 4, random);
+        let question, answer;
+        if (kind === 0) {
+            const a = randomInt(16, 39, random), b = randomInt(11, 29, random);
+            const c = randomInt(12, 37, random), d = randomInt(6, 25, random);
+            question = `${a} × ${b} + ${c} × ${d}`;
+            answer = a * b + c * d;
+        } else if (kind === 1) {
+            const a = randomInt(24, 96, random), b = randomInt(17, 83, random);
+            const c = randomInt(5, 19, random), d = randomInt(40, 170, random);
+            question = `(${a} + ${b}) × ${c} − ${d}`;
+            answer = (a + b) * c - d;
+        } else if (kind === 2) {
+            const a = randomInt(13, 48, random), b = randomInt(30, 79, random);
+            const c = randomInt(5, b - 4, random), d = randomInt(45, 160, random);
+            question = `${a} × (${b} − ${c}) + ${d}`;
+            answer = a * (b - c) + d;
+        } else if (kind === 3) {
+            const divisor = randomInt(3, 9, random), quotient = randomInt(12, 34, random);
+            const b = randomInt(7, 24, random), c = randomInt(11, 32, random);
+            const d = randomInt(3, 16, random), a = divisor * quotient;
+            question = `(${a} × ${b}) ÷ ${divisor} + ${c} × ${d}`;
+            answer = quotient * b + c * d;
+        } else {
+            const a = randomInt(18, 45, random), b = randomInt(12, 31, random);
+            const c = randomInt(10, 29, random), d = randomInt(14, 38, random);
+            const e = randomInt(5, 17, random);
+            question = `${a} × ${b} − (${c} + ${d}) × ${e}`;
+            answer = a * b - (c + d) * e;
         }
-        return { question: `(${a} + ${c}) × ${b}`, answer: (a + c) * b, level, points: 8 };
+        return { question, answer, level, points: 10 };
     }
     const kind = randomInt(0, 2, random);
     if (kind === 0) {
@@ -277,14 +379,18 @@ export function createGameEngine({
     log,
     scores,
     groups,
+    content,                    // rotating, persisted AI trivia + scramble puzzles
     random = Math.random,
     now = () => Date.now(),
     send = null,                 // (jid, text) => Promise — used for timed-out rounds
     autoSweep = true
 } = {}) {
     const timeoutMs   = Number.isFinite(config.gameTimeoutMs) ? config.gameTimeoutMs : 180_000;
-    const cooldownMs  = Number.isFinite(config.gameCooldownMs) ? config.gameCooldownMs : 15_000;
+    const cooldownMs  = Math.max(0, Math.min(Number.isFinite(config.gameCooldownMs) ? config.gameCooldownMs : 5_000, 5_000));
+    const participationWindowMs = Math.max(5_000, cooldownMs);
     const maxAttempts = Number.isFinite(config.gameMaxAttempts) ? config.gameMaxAttempts : 12;
+    let enabled = scores?.gamesEnabled?.(config.gamesEnabled !== false) ?? (config.gamesEnabled !== false);
+    let generation = 0;            // invalidates in-flight starts after stop/reset
 
     const rounds = new Map();           // jid → round
     const cooldowns = new Map();        // jid → timestamp a new round may start
@@ -349,9 +455,9 @@ export function createGameEngine({
      * The first attempt in a round earns a participation point — everyone who
      * plays contributes to the scoreboard.
      *
-     * The point is rate-limited per member per cooldown window: without that,
-     * starting a round, guessing once and immediately replacing the round would
-     * mint a point every few seconds. Rounds themselves stay unlimited.
+     * The point is rate-limited per member per five-second minimum window:
+     * without that, a zero-second cooldown or replacing an open round would
+     * mint participation points indefinitely. Rounds themselves stay unlimited.
      */
     function touchParticipation(round, entry, ctx, label) {
         if (!scores || entry.played) return;
@@ -359,7 +465,8 @@ export function createGameEngine({
         scores.visit(round.chat, whoOf(ctx, label));      // rounds played always count
 
         const stamp = `${round.chat}|${entry.key}`;
-        if (now() - (participationAt.get(stamp) || 0) < cooldownMs) return;
+        const previous = participationAt.get(stamp);
+        if (previous !== undefined && now() - previous < participationWindowMs) return;
         participationAt.set(stamp, now());
         scores.award(round.chat, whoOf(ctx, label), PARTICIPATION_POINTS);
         entry.earned += PARTICIPATION_POINTS;
@@ -367,7 +474,7 @@ export function createGameEngine({
 
     // ── rendering ────────────────────────────────────────────────────────────
     function listText() {
-        const lines = ['🎮 *Games* — everyone can play, everyone earns points', ''];
+        const lines = [`🎮 *Games* — ${enabled ? 'everyone can play, everyone earns points' : 'OFF (owner: !game on)'}`, ''];
         GAMES.forEach((g, i) => {
             lines.push(`${i + 1}. ${g.emoji} *${g.name}* — ${g.blurb}`);
             lines.push(`   \`${g.how}\``);
@@ -379,9 +486,11 @@ export function createGameEngine({
             '!game top        leaderboard of this chat',
             '!game top all    leaderboard across all chats',
             '!game me         your own score card',
-            '!game stop       end the round in play',
+            '!game end        starter: end this chat’s round',
+            '!game status     games on/off + rotating question counts',
             `!game addq Q ; A  contribute a trivia question (+${CONTRIBUTION_POINTS} pts)`,
             '```',
+            '_Owner: !game on · !game stop (all chats) · !game reset tops (all boards)_',
             `Quick random: !random [n|1-100|a, b, c] · !roll 2d6 · !flip · !pick a, b · !shuffle a, b · !8ball <question>`
         );
         return lines.join('\n');
@@ -398,7 +507,8 @@ export function createGameEngine({
         lines.push(
             'Everyone who takes part is on the scoreboard; the first right answer',
             'wins the round, and wrong guesses get hints. One game per chat at a',
-            'time — the round also ends by itself if nobody finds it in time.'
+            'time — the round also ends by itself if nobody finds it in time.',
+            'The built-in pool, member questions and a daily rotating AI pool keep rounds fresh.'
         );
         return lines.join('\n');
     }
@@ -528,14 +638,17 @@ export function createGameEngine({
             }
 
             case 'scramble': {
-                const word = pickOne(WORDS, random) || 'garden';
+                const puzzle = pickPuzzle(ctx.jid);
+                const word = puzzle.word;
                 round.answer = word;
                 round.accepted = [word];
                 round.scrambled = scrambleWord(word, random);
+                lastScramble.set(ctx.jid, word);
                 return {
                     round,
                     text: `${game.emoji} *Word scramble* — ${word.length} letters, first correct word wins ${game.points} pts\n\n`
-                        + `🔀 *${round.scrambled.toUpperCase()}*` + tail
+                        + `🔀 *${round.scrambled.toUpperCase()}*`
+                        + (puzzle.clue ? `\n_Clue: ${puzzle.clue}_` : '') + tail
                 };
             }
 
@@ -571,18 +684,24 @@ export function createGameEngine({
     }
 
     const lastQuestion = new Map();
+    const lastScramble = new Map();
 
-    /** A trivia question from the built-in pool plus what members contributed. */
+    /** O(pool size), bounded; no immediate repeats even with a fixed RNG. */
+    function pickDifferent(pool, previous, field) {
+        const options = pool.length > 1 ? pool.filter((p) => p[field] !== previous) : pool;
+        return pickOne(options.length ? options : pool, random);
+    }
+
+    /** Built-ins and member submissions persist; AI content rotates independently. */
     function pickQuestion(jid) {
         const contributed = (scores?.questions?.() || []).map((e) => ({ q: e.q, a: e.a, by: e.by }));
-        const pool = [...TRIVIA, ...contributed];
-        if (!pool.length) return null;
-        const previous = lastQuestion.get(jid);
-        for (let i = 0; i < 4; i++) {
-            const pick = pickOne(pool, random);
-            if (pick && pick.q !== previous) return pick;
-        }
-        return pickOne(pool, random);
+        const pool = [...TRIVIA, ...contributed, ...(content?.questions?.() || [])];
+        return pickDifferent(pool, lastQuestion.get(jid), 'q');
+    }
+
+    function pickPuzzle(jid) {
+        const pool = [...BUILTIN_PUZZLES, ...(content?.puzzles?.() || [])];
+        return pickDifferent(pool, lastScramble.get(jid), 'word') || { word: 'garden', clue: '' };
     }
 
     // ── attempts ─────────────────────────────────────────────────────────────
@@ -616,6 +735,7 @@ export function createGameEngine({
      * @returns {Promise<{handled:boolean, reply?:string, react?:string, wrong?:boolean}>}
      */
     async function takeAttempt(ctx, text, explicit) {
+        if (!enabled) return explicit ? gamesOff() : { handled: false };
         const round = active(ctx.jid);
         if (!round || round.closed) {
             return explicit
@@ -624,6 +744,11 @@ export function createGameEngine({
         }
 
         const label = await labelOf(ctx);
+        // labelOf awaits group metadata: an owner stop/reset may have cancelled
+        // this round while that lookup was pending. Never resurrect its score.
+        if (!enabled || active(ctx.jid) !== round || round.closed) {
+            return explicit ? (enabled ? { handled: true, react: 'ℹ️', reply: 'This round has ended.' } : gamesOff()) : { handled: false };
+        }
         const key = keyOf(ctx);
         const entry = playerEntry(round, key, label, idsOf(ctx));
         rememberIds(ctx, key);
@@ -898,9 +1023,87 @@ export function createGameEngine({
         return text;
     }
 
-    // ── !game subcommands ────────────────────────────────────────────────────
+    // ── owner controls and !game subcommands ─────────────────────────────────
+    const gamesOff = () => ({
+        handled: true, react: '🔕', reply: '🔕 Games are OFF. The bot owner can reopen them with *!game on*.'
+    });
+    const ownerOnly = () => ({ handled: true, react: '⛔', reply: '⛔ Only the bot owner can use that command.' });
+
+    /** Cancel, never draw a winner or score a last guess. Inform other chats. */
+    function cancelAll(origin, reason) {
+        generation++;
+        const cancelled = [...rounds.values()];
+        for (const round of cancelled) round.closed = true;
+        rounds.clear();
+        cooldowns.clear();
+        lastQuestion.clear();
+        lastScramble.clear();
+        if (send && cancelled.length) {
+            // Sequential/async: do not hold up the owner's confirmation or
+            // flood the WhatsApp socket if many groups had an open round.
+            void (async () => {
+                for (const round of cancelled) {
+                    if (round.chat === origin) continue; // owner gets the command reply here
+                    try { await send(round.chat, `🛑 ${reason} by the bot owner. The ${round.name} round was cancelled.`); }
+                    catch (err) { log?.warn?.(`game: cancellation notice failed in ${round.chat}: ${err.message}`); }
+                }
+            })();
+        }
+        return cancelled.length;
+    }
+
+    function statusText() {
+        return `🎮 Games: *${enabled ? 'ON' : 'OFF'}* · ${rounds.size} active round(s) · ${cooldownMs / 1000}s between rounds\n`
+            + `🧠 Daily AI pool: ${content?.questionCount || 0} trivia · ${content?.puzzleCount || 0} puzzles`
+            + (content?.generatedAt ? ` (updated ${content.generatedAt.slice(0, 10)})` : ' (using built-ins until ready)');
+    }
+
     async function handle(ctx, args = []) {
         const sub = String(args[0] || '').toLowerCase();
+
+        if (sub === 'status') return { handled: true, reply: statusText() };
+        if (sub === 'on') {
+            if (!ctx.isOwner) return ownerOnly();
+            enabled = true;
+            const saved = scores?.setGamesEnabled?.(true);
+            content?.start?.();
+            // start() refreshes in the background, and refreshIfStale is
+            // single-flight and a no-op until the next 24-hour boundary.
+            if (content?.refreshIfStale) {
+                void Promise.resolve().then(() => content.refreshIfStale())
+                    .catch((err) => log?.warn?.(`game content: ${err.message}`));
+            }
+            return { handled: true, react: '✅', reply: `✅ Games are ON for all members.${saved === false ? ' ⚠️ Could not save this setting to disk.' : ''}` };
+        }
+        if (sub === 'off' || (sub === 'stop' && ctx.isOwner)) {
+            if (!ctx.isOwner) return ownerOnly();
+            enabled = false;
+            const saved = scores?.setGamesEnabled?.(false);
+            const count = cancelAll(ctx.jid, 'All games stopped');
+            content?.pause?.();
+            log?.info?.(`game: globally stopped by ${ctx.senderLabel} (${count} rounds)`);
+            return {
+                handled: true, react: '🛑',
+                reply: `🛑 Games are OFF for all members. ${count} active round(s) cancelled. Use *!game on* to reopen.`
+                    + (saved === false ? '\n⚠️ Could not save this setting to disk.' : '')
+            };
+        }
+        if (sub === 'reset') {
+            if (!ctx.isOwner) return ownerOnly();
+            if (!['tops', 'top', 'scores'].includes(String(args[1] || '').toLowerCase()) || args.length !== 2) {
+                return { handled: true, react: '⚠️', reply: 'Usage: `!game reset tops` (clears all leaderboards).' };
+            }
+            if (!scores?.resetBoards) return { handled: true, react: '⚠️', reply: 'The leaderboard is not available.' };
+            const count = cancelAll(ctx.jid, 'Leaderboards reset');
+            participationAt.clear();
+            const { players, saved } = scores.resetBoards();
+            log?.info?.(`game: all leaderboards reset by ${ctx.senderLabel} (${players} players)`);
+            return {
+                handled: true, react: saved ? '✅' : '⚠️',
+                reply: `🏆 All leaderboards reset (${players} players, ${count} rounds cancelled). Member questions are kept.`
+                    + (saved ? '' : '\n⚠️ Could not save the reset to disk; the old scores may return after a restart.')
+            };
+        }
 
         if (!sub || sub === 'list' || sub === 'games') return { handled: true, reply: listText() };
         if (sub === 'help' || sub === 'how' || sub === 'rules') return { handled: true, reply: helpText() };
@@ -910,6 +1113,7 @@ export function createGameEngine({
         if (sub === 'me' || sub === 'mine' || sub === 'stats') {
             return { handled: true, reply: meText(ctx) };
         }
+        if (!enabled) return gamesOff();
         if (sub === 'addq' || sub === 'add' || sub === 'contribute') {
             return addQuestion(ctx, args.slice(1));
         }
@@ -943,9 +1147,14 @@ export function createGameEngine({
     }
 
     async function start(ctx, game, args) {
-        const current = active(ctx.jid);
+        const startGeneration = generation;
         const key = keyOf(ctx);
         const label = await labelOf(ctx);
+        if (!enabled) return gamesOff(); // owner may have stopped games during the await
+        if (generation !== startGeneration) {
+            return { handled: true, react: 'ℹ️', reply: 'Games were cancelled while starting this round. Send the command again.' };
+        }
+        const current = active(ctx.jid);
 
         if (current) {
             if (current.name === game.name && game.name === 'lucky') return join(ctx);
@@ -1026,17 +1235,22 @@ export function createGameEngine({
     }
 
     async function join(ctx) {
+        if (!enabled) return gamesOff();
         const round = active(ctx.jid);
         if (round?.name !== 'lucky') {
             return { handled: true, react: '⚠️', reply: '⚠️ No draw is open. Start one with *!game lucky*' };
         }
         const label = await labelOf(ctx);
+        if (!enabled || active(ctx.jid) !== round || round.closed) {
+            return enabled ? { handled: true, react: 'ℹ️', reply: 'The draw has ended.' } : gamesOff();
+        }
         const out = joinInternal(round, ctx, label);
         return { handled: true, react: out.ok ? '🎟️' : 'ℹ️', reply: out.reply };
     }
 
     // ── !guess and plain replies ─────────────────────────────────────────────
     async function guess(ctx, args = []) {
+        if (!enabled) return gamesOff();
         const text = (args || []).join(' ').trim()
             || String(ctx.text || '').replace(/^!\S*\s*/, '').trim();
         if (!text) {
@@ -1051,6 +1265,7 @@ export function createGameEngine({
      * chat keeps flowing to the quiz solver untouched.
      */
     async function handleMessage(ctx) {
+        if (!enabled) return { handled: false };
         const round = active(ctx.jid);
         if (!round || round.closed) return { handled: false };
 
@@ -1087,6 +1302,7 @@ export function createGameEngine({
      * pool cannot be used as a point farm.
      */
     function addQuestion(ctx, args) {
+        if (!enabled) return gamesOff();
         const raw = args.join(' ').trim();
         const split = raw.match(/^(.*?)\s*(?:;|\||->)\s*(.+)$/);
         if (!raw || !split) {
@@ -1137,7 +1353,7 @@ export function createGameEngine({
     async function sweep() {
         const out = [];
         for (const [jid, round] of [...rounds]) {
-            if (now() < round.endsAt) continue;
+            if (active(jid) !== round || now() < round.endsAt) continue;
 
             let text;
             if (round.name === 'lucky') {
@@ -1145,16 +1361,22 @@ export function createGameEngine({
             } else {
                 text = endRound(jid, { reason: 'timeout' });
             }
-            if (text) {
-                out.push({ chat: jid, game: round.name, text });
-                if (send) {
-                    try {
-                        await send(jid, text);
-                    } catch (err) {
-                        log?.debug?.(`game: could not announce the end of ${round.name} in ${jid}: ${err.message}`);
-                    }
-                }
+            if (text) out.push({ chat: jid, game: round.name, text });
+        }
+        // Close ALL expired rounds before any slow WhatsApp send: a busy chat
+        // cannot keep another chat's finished round open past its deadline.
+        if (send) {
+            for (const item of out) {
+                try { await send(item.chat, item.text); }
+                catch (err) { log?.debug?.(`game: could not announce the end of ${item.game} in ${item.chat}: ${err.message}`); }
             }
+        }
+        // These maps contain only short-lived rate limits, not player history.
+        // Expire entries so a busy bot cannot accumulate one key per member
+        // forever across thousands of groups.
+        for (const [jid, until] of cooldowns) if (until <= now()) cooldowns.delete(jid);
+        for (const [stamp, at] of participationAt) {
+            if (at + participationWindowMs <= now()) participationAt.delete(stamp);
         }
         return out;
     }
@@ -1165,7 +1387,7 @@ export function createGameEngine({
     }
 
     if (autoSweep) {
-        timer = setInterval(() => { sweep().catch((err) => log?.debug?.(`game sweep: ${err.message}`)); }, 15_000);
+        timer = setInterval(() => { sweep().catch((err) => log?.debug?.(`game sweep: ${err.message}`)); }, 1000);
         timer.unref?.();
     }
 
@@ -1184,6 +1406,7 @@ export function createGameEngine({
         close,
         /** Test/dev hook: finish a round without waiting for the timer. */
         end: (jid, opts) => endRound(jid, opts),
+        get enabled() { return enabled; },
         get roundCount() { return rounds.size; }
     };
 

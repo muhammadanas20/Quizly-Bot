@@ -28,6 +28,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const bot = await startBot({
     config,
     log,
+    // The daily game-content worker must not contact a real API in a socket test.
+    fetchImpl: async () => ({ status: 503, text: async () => '{"error":{"message":"offline test"}}' }),
     authStateFactory: async () => ({ state: {}, saveCreds: async () => {} }),
     socketFactory: () => {
         const ws = new EventEmitter();
