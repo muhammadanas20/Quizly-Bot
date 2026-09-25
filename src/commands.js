@@ -9,8 +9,9 @@
  *   !quiz                                anyone (solve attached/quoted image now)
  *   !ping  !stats                        anyone
  *
- *   !game [list|help|top|me|end|addq|name]   anyone — the game engine (games.js)
+ *   !game [list|help|top|me|end|name]      anyone — the game engine (games.js)
  *   !game on|stop|reset tops|reset @member  owner — game controls
+ *   !game addq Q ; A                        owner — curate the trivia pool
  *   !guess <answer>  !in  !top               anyone — those games' shortcuts
  *   !random !roll !flip !pick !shuffle !8ball  anyone — instant randomness
  *
@@ -91,7 +92,7 @@ export const HELP_TEXT = [
     `${PREFIX}game me                your own score card`,
     `${PREFIX}game end               starter: end this chat’s round`,
     `${PREFIX}game status            games on/off + daily content`,
-    `${PREFIX}game addq Q ; A        add your own trivia question`,
+    `${PREFIX}game addq Q ; A        add a trivia question (owner only)`,
     '```',
     '*Random*',
     '```',
@@ -326,7 +327,8 @@ export function createCommandHandler({ config, flags, log, guard, limiter, group
 
             // ── games ────────────────────────────────────────────────────────
             // Members play and view scores; games.handle checks owner status
-            // for global on/stop/reset subcommands (never trust the prefix).
+            // for the global on/stop/reset subcommands and for addq (never
+            // trust the prefix).
             case 'game':
                 if (!games) return NO_GAMES;
                 return await games.handle(ctx, cmd.args);

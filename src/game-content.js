@@ -14,7 +14,7 @@
  * Batches run one at a time with BATCH_GAP_MS between requests, and each batch
  * starts at a different provider (round-robin over the configured keys, e.g.
  * groq → gemini → groq …) so the load is shared. A failure keeps the current
- * pool and backs off per category. Built-in and member questions never change.
+ * pool and backs off per category. Built-in and contributed questions never change.
  */
 
 import fs from 'node:fs';
