@@ -57,9 +57,12 @@ export function createScoreStore({ file, log, maxQuestions = MAX_QUESTIONS } = {
                         version  : VERSION,
                         chats    : parsed.chats && typeof parsed.chats === 'object' ? parsed.chats : {},
                         questions: Array.isArray(parsed.questions) ? parsed.questions : [],
-                        settings : typeof parsed.settings?.gamesEnabled === 'boolean'
-                            ? { gamesEnabled: parsed.settings.gamesEnabled }
-                            : {}
+                        settings : {
+                            ...(typeof parsed.settings?.gamesEnabled === 'boolean'
+                                ? { gamesEnabled: parsed.settings.gamesEnabled } : {}),
+                            ...(parsed.settings?.modes && typeof parsed.settings.modes === 'object'
+                                ? { modes: parsed.settings.modes } : {})
+                        }
                     };
                 }
             }
@@ -104,6 +107,37 @@ export function createScoreStore({ file, log, maxQuestions = MAX_QUESTIONS } = {
         const players = Object.values(data.chats).reduce((n, c) => n + Object.keys(c.players || {}).length, 0);
         data.chats = {};
         return { players, saved: flush() }; // questions and owner settings stay put
+    }
+
+    /**
+     * Owner: wipe ONE member's row (points, wins, streak) in one chat, or in
+     * every chat with `everywhere`. Their aliases go too, so they start fresh.
+     * @returns {{found:number, points:number, name:string, saved:boolean}}
+     */
+    function resetPlayer(jid, ids, { everywhere = false } = {}) {
+        const list = [...(ids || [])].map(String).filter(Boolean);
+        const chats = everywhere ? Object.keys(data.chats) : [String(jid || '')];
+        let found = 0, points = 0, name = '';
+        for (const c of chats) {
+            const chat = data.chats[c];
+            if (!chat) continue;
+            const key = keyFor(c, list) || (chat.players[canonicalKey(list)] ? canonicalKey(list) : '');
+            if (!key || !chat.players[key]) continue;
+            const row = chat.players[key];
+            found++;
+            points += row.points || 0;
+            name = name || row.name || '';
+            delete chat.players[key];
+            for (const [alias, k] of Object.entries(chat.aliases || {})) if (k === key) delete chat.aliases[alias];
+        }
+        return { found, points, name, saved: found ? flush() : true };
+    }
+
+    /** Per-chat difficulty for math/code: 'easy' | 'hard'. */
+    const modeOf = (jid) => data.settings.modes?.[String(jid)] === 'hard' ? 'hard' : 'easy';
+    function setMode(jid, mode) {
+        data.settings.modes = { ...(data.settings.modes || {}), [String(jid)]: mode === 'hard' ? 'hard' : 'easy' };
+        return flush();
     }
 
     // ── chats / players ──────────────────────────────────────────────────────
@@ -320,6 +354,9 @@ export function createScoreStore({ file, log, maxQuestions = MAX_QUESTIONS } = {
         gamesEnabled,
         setGamesEnabled,
         resetBoards,
+        resetPlayer,
+        modeOf,
+        setMode,
         chatOf,
         register,
         playerOf,

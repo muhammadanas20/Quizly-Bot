@@ -151,7 +151,13 @@ export function loadConfig(env = process.env) {
         groq: {
             key            : String(env.GROQ_API_KEY || '').trim(),
             model          : String(env.GROQ_MODEL || 'meta-llama/llama-4-scout-17b-16e-instruct').trim(),
-            fallbacks      : list(env.GROQ_MODEL_FALLBACKS)
+            fallbacks      : list(env.GROQ_MODEL_FALLBACKS),
+            // Text-only model for game-content generation. The old vision
+            // default (llama-4-scout) was shut down by Groq on 2026-07-17.
+            textModel      : String(env.GROQ_TEXT_MODEL || 'openai/gpt-oss-120b').trim(),
+            textFallbacks  : env.GROQ_TEXT_MODEL_FALLBACKS === undefined
+                ? ['openai/gpt-oss-20b']
+                : list(env.GROQ_TEXT_MODEL_FALLBACKS)
         },
 
         // Quiz
@@ -182,6 +188,12 @@ export function loadConfig(env = process.env) {
         // One bounded text-only AI request per day replaces the generated pool.
         gameAiTriviaCount: Math.max(1, Math.min(int(env.GAME_AI_TRIVIA_COUNT, 16) || 16, 32)),
         gameAiPuzzleCount: Math.max(1, Math.min(int(env.GAME_AI_PUZZLE_COUNT, 16) || 16, 32)),
+        gameAiMathCount  : Math.max(1, Math.min(int(env.GAME_AI_MATH_COUNT, 16) || 16, 32)),
+        gameAiCodeCount  : Math.max(1, Math.min(int(env.GAME_AI_CODE_COUNT, 16) || 16, 32)),
+        // trivia + scramble: replace everything if played, every N hours
+        gameAiTriviaHours: Math.max(1, Math.min(int(env.GAME_AI_TRIVIA_HOURS, 5) || 5, 48)),
+        // math + code: replace only used questions, every N hours
+        gameAiStudyHours : Math.max(1, Math.min(int(env.GAME_AI_STUDY_HOURS, 10) || 10, 72)),
 
         // Limits
         ratePerMinute   : int(env.RATE_PER_MINUTE, 12) || 12,

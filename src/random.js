@@ -116,11 +116,6 @@ export function flipCoin(random = Math.random) {
     return random() < 0.5 ? 'Heads' : 'Tails';
 }
 
-/** Reels for the slot game: [7, 3, 9] with sides=9, count=3. */
-export function slotReels({ count = 3, sides = 9 } = {}, random = Math.random) {
-    return Array.from({ length: count }, () => randomInt(1, sides, random));
-}
-
 /**
  * "heads", "h", "head" → true; "tails", "t", "tail" → false; anything else null.
  * Used by both `!flip` and the coin game so they agree on the spellings.

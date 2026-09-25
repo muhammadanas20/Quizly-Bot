@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { createGameEngine, GAMES, TRIVIA, findGame, answerMatches, normalizeAnswer, hotCold, scrambleWord, makeMath, WORDS } from '../src/games.js';
+import { createGameEngine, GAMES, TRIVIA, findGame, answerMatches, looseMatches, normalizeAnswer, hotCold, scrambleWord, makeMath, WORDS } from '../src/games.js';
 import { createScoreStore } from '../src/scores.js';
 import { loadConfig } from '../src/config.js';
 import log from '../src/log.js';
@@ -141,7 +141,9 @@ test('built-in trivia and scramble pools have varied, non-duplicated fallbacks',
 });
 
 test('every advertised game can be started by its canonical name', () => {
-    assert.equal(GAMES.length, 8);
+    assert.equal(GAMES.length, 7);
+    assert.equal(findGame('dice'), null, 'dice was removed');
+    assert.equal(findGame('slots'), null, 'slots was removed');
     for (const g of GAMES) {
         assert.equal(findGame(g.name)?.name, g.name);
         assert.equal(findGame(g.aliases[0])?.name, g.name);
@@ -264,20 +266,7 @@ test('a streak pays a bonus on the next win', async () => {
     assert.match(second.reply, /streak bonus 🔥2/);
 });
 
-// ── dice, coin, slots ────────────────────────────────────────────────────────
-test('!game dice: the die is 4 with this RNG', async () => {
-    const { games } = world();
-    await games.handle(asAli('!game dice'), ['dice']);
-    assert.equal(games.active(GROUP).answer, 4);
-
-    const hint = await games.guess(asAli('!guess 2'), ['2']);
-    assert.match(hint.reply, /higher than 2/);
-
-    const win = await games.guess(asAli('!guess 4'), ['4']);
-    assert.match(win.reply, /the die was \*4\*/);
-    assert.match(win.reply, /\*\+6\* pts/);
-});
-
+// ── coin ────────────────────────────────────────────────────────
 test('!game coin: a wrong call is a reaction, both calls end the round', async () => {
     const { games } = world({ random: () => 0.9 });    // 0.9 → Tails
     await games.handle(asAli('!game coin'), ['coin']);
@@ -293,39 +282,10 @@ test('!game coin: a wrong call is a reaction, both calls end the round', async (
     assert.equal(games.active(GROUP), null);
 });
 
-test('!game slots pays a pair and a jackpot, and stops on the jackpot', async () => {
-    // reels [5, 5, 2]: digit 5 pays a pair, digit 2 pays nothing
-    const pair = world({ random: seq([0.5, 0.5, 0.2]) });
-    await pair.games.handle(asAli('!game slots'), ['slots']);
-    assert.deepEqual(pair.games.active(GROUP).reels, [5, 5, 2]);
-
-    const paid = await pair.games.guess(asAli('!guess 5'), ['5']);
-    assert.equal(paid.react, '✅');
-    assert.match(paid.reply, /two on the reels/);
-    assert.equal(pair.scores.playerOf(GROUP, [PN]).points, 3 + 1, 'pair + participation');
-
-    const nothing = await pair.games.guess(asSana('!guess 8'), ['8']);
-    assert.equal(nothing.react, '❌');
-
-    const oneEach = await pair.games.guess(asSana('!guess 5'), ['5']);
-    assert.match(oneEach.reply, /One pick each/);
-
-    // three reels the same: jackpot, and the round closes with the reveal
-    const jackpot = world();                            // 0.5 → reels [5, 5, 5]
-    await jackpot.games.handle(asAli('!game slots'), ['slots']);
-    assert.deepEqual(jackpot.games.active(GROUP).reels, [5, 5, 5]);
-    const hit = await jackpot.games.guess(asAli('!guess 5'), ['5']);
-    assert.equal(hit.react, '🎉');
-    assert.match(hit.reply, /THREE of a kind/);
-    assert.match(hit.reply, /🎮 Ali \+16/, 'the jackpot plus the participation point');
-    assert.equal(jackpot.games.active(GROUP), null);
-    assert.equal(jackpot.scores.playerOf(GROUP, [PN]).points, 15 + 1);
-});
-
 // ── math, scramble, trivia ───────────────────────────────────────────────────
 test('!game math asks a random sum and the first right answer takes it', async () => {
     const { games } = world();
-    const start = await games.handle(asAli('!game math'), ['math']);
+    const start = await games.handle(asAli('!game math arith'), ['math', 'arith']);
     const round = games.active(GROUP);
     assert.match(start.reply, new RegExp(round.problem.question.replace(/[+×−()]/g, (c) => `\\${c}`)));
 
@@ -523,9 +483,9 @@ test('only the starter or the owner can stop a round', async () => {
 
 test('the starter can still stop only their own round without disabling games', async () => {
     const { games } = world();
-    await games.handle(asAli('!game dice'), ['dice']);
+    await games.handle(asAli('!game coin'), ['coin']);
     const stopped = await games.handle(asAli('!game stop'), ['stop']);
-    assert.match(stopped.reply, /the die was/);
+    assert.match(stopped.reply, /the coin was/);
     assert.equal(games.enabled, true);
     assert.equal(games.roundCount, 0);
 });
@@ -534,14 +494,14 @@ test('a stranger cannot replace a running round, the starter can', async () => {
     const { games } = world();
     await games.handle(asAli('!game number'), ['number']);
 
-    const blocked = await games.handle(asSana('!game dice'), ['dice']);
+    const blocked = await games.handle(asSana('!game coin'), ['coin']);
     assert.equal(blocked.react, '⏳');
     assert.match(blocked.reply, /already running|still running/);
     assert.equal(games.active(GROUP).name, 'number');
 
-    const replaced = await games.handle(asAli('!game dice'), ['dice']);
-    assert.match(replaced.reply, /Dice/);
-    assert.equal(games.active(GROUP).name, 'dice');
+    const replaced = await games.handle(asAli('!game coin'), ['coin']);
+    assert.match(replaced.reply, /Coin toss/);
+    assert.equal(games.active(GROUP).name, 'coin');
 });
 
 test('a new round waits out the cooldown after the last one', async () => {
@@ -549,13 +509,13 @@ test('a new round waits out the cooldown after the last one', async () => {
     await games.handle(asAli('!game number'), ['number']);
     await games.guess(asAli('!guess 51'), ['51']);
 
-    const tooSoon = await games.handle(asAli('!game dice'), ['dice']);
+    const tooSoon = await games.handle(asAli('!game coin'), ['coin']);
     assert.equal(tooSoon.react, '⏳');
     assert.match(tooSoon.reply, /breather/);
 
     tick(config.gameCooldownMs + 1000);
-    const ok = await games.handle(asAli('!game dice'), ['dice']);
-    assert.match(ok.reply, /Dice/);
+    const ok = await games.handle(asAli('!game coin'), ['coin']);
+    assert.match(ok.reply, /Coin toss/);
 });
 
 test('a round that times out is revealed to the group through send()', async () => {
@@ -661,7 +621,7 @@ test('!game stop by the owner cancels ALL chats without drawing winners, and !ga
     assert.equal(disk.gamesEnabled(true), false, 'switch survives a restart');
     assert.equal((await games.handle(asAli('!game on', { isOwner: true }), ['on'])).react, '✅');
     assert.equal(games.enabled, true);
-    assert.match((await games.handle(asSana('!game dice'), ['dice'])).reply, /Dice/);
+    assert.match((await games.handle(asSana('!game coin'), ['coin'])).reply, /Coin toss/);
 });
 
 test('!game reset tops clears all leaderboards but keeps questions and game settings', async () => {
@@ -689,9 +649,9 @@ test('!game reset tops clears all leaderboards but keeps questions and game sett
     const disk = createScoreStore({ file: path.join(dir, 'scores.json') }).load();
     assert.equal(disk.playerCount, 0);
     assert.equal(disk.questionCount, 1);
-    await games.handle(asAli('!game dice'), ['dice']);
-    await games.guess(asAli('!guess 4'), ['4']);
-    assert.equal(scores.board(GROUP)[0].points, 7, 'new scores start from zero');
+    await games.handle(asAli('!game coin'), ['coin']);
+    await games.guess(asAli('!guess tails'), ['tails']);
+    assert.equal(scores.board(GROUP)[0].points, 3, 'new scores start from zero');
 });
 
 test('GAMES=off is an initial setting: owner can enable it and the override persists', async () => {
@@ -736,11 +696,116 @@ test('a pending start or guess cannot award points after a global stop/reset', a
     let releaseStart;
     const held = new Promise((resolve) => { releaseStart = resolve; });
     const startedBeforeReset = games.handle({
-        ...asAli('!game dice'), groups: { nameOf: async () => { await held; return 'Ali'; } }
-    }, ['dice']);
+        ...asAli('!game coin'), groups: { nameOf: async () => { await held; return 'Ali'; } }
+    }, ['coin']);
     await Promise.resolve();
     await games.handle(asSana('!game reset tops', { isOwner: true }), ['reset', 'tops']);
     releaseStart();
     assert.match((await startedBeforeReset).reply, /cancelled while starting/);
     assert.equal(games.roundCount, 0);
+});
+
+// ── math concepts, programming, modes, member reset ─────────────────────────
+import { MATH_BANK, CODE_BANK, parseTopic } from '../src/banks.js';
+
+test('concept banks: linear algebra, calculus, mvc and pf/oop/ds/coal at both levels', () => {
+    for (const [bank, topics] of [[MATH_BANK, ['linear', 'calculus', 'mvc']], [CODE_BANK, ['pf', 'oop', 'ds', 'coal']]]) {
+        assert.equal(new Set(bank.map((e) => e.q)).size, bank.length, 'no duplicate questions');
+        for (const t of topics) for (const level of ['easy', 'hard']) {
+            assert.ok(bank.some((e) => e.topic === t && e.level === level), `${t}/${level}`);
+        }
+        assert.ok(bank.every((e) => e.a.length && e.a.every((a) => a.length <= 60)));
+    }
+    assert.equal(parseTopic(['hard', 'linear'], 'math'), 'linear');
+    assert.equal(parseTopic(['asm'], 'code'), 'coal');
+});
+
+test('looseMatches handles symbols, fractions and signs', () => {
+    assert.equal(looseMatches('O(nlogn)', ['O(n log n)']), true);
+    assert.equal(looseMatches('n log n', ['O(n log n)', 'n log n']), true);
+    assert.equal(looseMatches('0.5', ['1/2']), true);
+    assert.equal(looseMatches('3', ['-3']), false, 'a sign is never ignored');
+    assert.equal(looseMatches('-3', ['-3']), true);
+    assert.equal(looseMatches('CX', ['cx']), true);
+    assert.equal(looseMatches('3x^2', ['3x²']), true);
+    assert.equal(looseMatches('stack', ['queue']), false);
+});
+
+test('!game math linear asks a linear-algebra question and a correct answer wins', async () => {
+    const { games } = world();
+    const start = await games.handle(asAli('!game math hard linear'), ['math', 'hard', 'linear']);
+    const round = games.active(GROUP);
+    assert.equal(round.pool.topic, 'linear');
+    assert.equal(round.pool.level, 'hard');
+    assert.match(start.reply, /hard · linear algebra/);
+    assert.deepEqual(await games.handleMessage(asSana('lol what')), { handled: false }, 'chat is ignored');
+    const win = await games.handleMessage(asAli(round.accepted[0]));
+    assert.equal(win.react, '🎉');
+    assert.match(win.reply, /\*\+10\* pts/);
+});
+
+test('!game code: programming questions by topic, easy by default', async () => {
+    const { games, scores } = world();
+    const start = await games.handle(asAli('!game code coal'), ['code', 'coal']);
+    const round = games.active(GROUP);
+    assert.equal(round.pool.topic, 'coal');
+    assert.equal(round.pool.level, 'easy');
+    assert.match(start.reply, /Programming\* \(easy · COAL/);
+    const miss = await games.guess(asSana('!guess banana'), ['banana']);
+    assert.equal(miss.react, '❌');
+    const win = await games.guess(asAli(`!guess ${round.accepted[0]}`), [round.accepted[0]]);
+    assert.equal(win.react, '🎉');
+    assert.equal(scores.playerOf(GROUP, [PN]).points, 6, '5 easy + 1 participation');
+    assert.equal(findGame('programming').name, 'code');
+});
+
+test('!game mode hard switches math + code for this chat and persists', async () => {
+    const { games, scores, tick, dir } = world();
+    assert.match((await games.handle(asAli('!game mode'), ['mode'])).reply, /easy/);
+    const set = await games.handle(asAli('!game mode hard'), ['mode', 'hard']);
+    assert.match(set.reply, /now \*hard\*/);
+    await games.handle(asAli('!game code'), ['code']);
+    assert.equal(games.active(GROUP).pool.level, 'hard');
+    await games.handle(asAli('!game end'), ['end']);
+    tick(10_000);
+    await games.handle(asAli('!game code easy'), ['code', 'easy']);
+    assert.equal(games.active(GROUP).pool.level, 'easy', 'one round can override');
+    assert.equal(scores.modeOf(OTHER), 'easy', 'other chats are untouched');
+    assert.equal(createScoreStore({ file: path.join(dir, 'scores.json') }).load().modeOf(GROUP), 'hard');
+});
+
+test('AI math/code items are drawn and marked as used', async () => {
+    const used = [];
+    const aiItem = { q: 'What is the rank of a 4x4 identity matrix?', a: ['4'], level: 'easy', topic: 'linear' };
+    const content = { items: (c) => (c === 'math' ? [aiItem] : []), markUsed: (c, i) => used.push([c, i.q]) };
+    const { games } = world({ random: () => 0.9999, content });
+    await games.handle(asAli('!game math linear'), ['math', 'linear']);
+    assert.equal(games.active(GROUP).pool, aiItem);
+    assert.deepEqual(used, [['math', aiItem.q]]);
+});
+
+test('!game reset @member: owner only, clears one member in this chat (or all chats)', async () => {
+    const { games, scores } = world();
+    scores.win(GROUP, { ids: [PN], name: 'Ali' }, 10);
+    scores.win(GROUP, { ids: [PN2], name: 'Sana' }, 6);
+    scores.win(OTHER, { ids: [PN2], name: 'Sana' }, 4);
+    const mention = { mentioned: [`${PN2}@s.whatsapp.net`] };
+
+    const denied = await games.handle(asSana('!game reset @Sana', mention), ['reset', '@Sana']);
+    assert.equal(denied.react, '⛔');
+    assert.match((await games.handle(asAli('!game reset', { isOwner: true }), ['reset'])).reply, /Usage/);
+
+    const out = await games.handle({ ...asAli('!game reset @Sana', { isOwner: true }), ...mention }, ['reset', '@Sana']);
+    assert.equal(out.react, '✅');
+    assert.match(out.reply, /Sana: 6 pts cleared/);
+    assert.equal(scores.playerOf(GROUP, [PN2]), null);
+    assert.equal(scores.playerOf(GROUP, [PN]).points, 10, 'others keep their points');
+    assert.equal(scores.playerOf(OTHER, [PN2]).points, 4, 'other chats untouched');
+
+    const again = await games.handle({ ...asAli('x', { isOwner: true }), ...mention }, ['reset', '@Sana']);
+    assert.equal(again.react, 'ℹ️');
+
+    const typed = await games.handle(asAli('!game reset 923009876543 all', { isOwner: true }), ['reset', PN2, 'all']);
+    assert.match(typed.reply, /4 pts cleared in 1 chat/);
+    assert.equal(scores.playerOf(OTHER, [PN2]), null);
 });

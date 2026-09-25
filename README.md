@@ -7,7 +7,7 @@ A WhatsApp bot that does three jobs, built to run on a **1 GiB RAM** VM:
 2. **Silent media guard** — a member you flag has their stickers and photos removed
    the instant they post them, including view-once photos, in any group where the bot is
    admin. **The bot never warns or sends replacement media.** The flagged media just disappears.
-3. **Group games** — eight random-number games the whole group plays together
+3. **Group games** — seven games (including maths and programming quizzes) the whole group plays together
    (`!game`), with a per-group scoreboard every member contributes to (`!top`).
 
 ---
@@ -102,16 +102,15 @@ its own is an explicit stickers-only policy and leaves it alone.
 
 ## Games the whole group plays
 
-Eight games, all driven by random numbers, one round per chat at a time — and a
+Seven games, one round per chat at a time — and a
 scoreboard every member contributes to:
 
 | Game | Start it with | How you win | Points |
 |---|---|---|---|
 | 🔢 `number` | `!game number [1-100]` | send numbers; too high / too low, hot-and-cold, and a narrowing hint after four misses | 10 − 1 per wrong guess |
-| 🎲 `dice` | `!game dice` | guess the face of one die, 1-6 | 6 |
 | 🪙 `coin` | `!game coin` | call heads or tails on a coin that is already in the air | 2 |
-| 🎰 `slots` | `!game slots` | pick a lucky digit 1-9; three random reels pay a pair or three of a kind | 3 / 15 |
-| ➗ `math` | `!game math [hard]` | first correct answer; hard mode mixes multi-step arithmetic and exact division | 5 easy / 10 hard |
+| ➗ `math` | `!game math [easy\|hard] [linear\|calc\|mvc\|arith]` | arithmetic plus linear algebra (matrices, determinants, vector spaces, eigenvalues), calculus and multivariable calculus | 5 easy / 10 hard |
+| 💻 `code` | `!game code [easy\|hard] [pf\|oop\|ds\|coal]` | programming fundamentals, OOP, data structures, COAL (8086 assembly, registers, flags) | 5 easy / 10 hard |
 | 🔤 `scramble` | `!game scramble` | first correct answer to a shuffled word (some have clues) | 5 |
 | 🧠 `trivia` | `!game trivia` | first correct answer — built-in, member and rotating AI questions | 5 |
 | 🎁 `lucky` | `!game lucky` → `!in` → `!game draw` | a random entrant is drawn | 8 |
@@ -155,6 +154,7 @@ contributes are worth +2 points each:
 | `!game on` | Allow members in every chat to start/play games; works even when `GAMES=off` in `.env` |
 | `!game stop` | Turn games off in every chat and cancel all open rounds (no lucky-draw payout); other active chats get a cancellation notice |
 | `!game reset tops` | Clear **all** chat/global leaderboards and cancel open rounds; keep contributed questions and leave games on/off unchanged |
+| `!game reset @member` | Reset one member's points in this chat (`!game reset @member all` = every chat; a typed number works too) |
 | `!game end` | End only the current chat's round, without changing the global switch |
 | `!game status` | Anyone can see whether games are on and how many daily AI questions/puzzles are ready |
 
@@ -163,17 +163,23 @@ commands. A round starter may still use `!game stop` to end **their own** round,
 not the global game switch. Scores/owner settings survive restarts in
 `DATA_DIR/scores.json`; `!top` and `!game me` remain readable while games are off.
 
-**Fresh content every day:** The shipped pools now include 82 trivia questions and
-116 scramble words. While games are enabled, one text-only AI request through
-`AI_ORDER` creates up to 16 more trivia questions and 16 word/clue puzzles every
-24 hours. Validated content is saved in `DATA_DIR/game-content.json`; a successful
-refresh **replaces yesterday's generated questions/puzzles** rather than growing the
-file forever. Built-ins and member-submitted questions are never deleted; repeated
-questions and scramble words are filtered against shipped/member/previous content.
-If the AI is unavailable, malformed or rate-limited, the bot keeps the current pool
-and retries later with bounded backoff. Rounds already in progress keep their answer.
-`GAME_AI_TRIVIA_COUNT` / `GAME_AI_PUZZLE_COUNT` tune the requested batch size
-(maximum 32 each); the refresh uses your existing AI key/quota, not a new service.
+**Easy / hard mode:** `!game mode hard` (or `easy`) sets the default level for
+math and code in that chat, and is saved. One round can override it:
+`!game math easy`, `!game code hard coal`.
+
+**Fresh AI questions, in small batches:** four pools are generated through your
+AI keys, one small request per category, 20 s apart, each batch starting on the
+next provider (groq → gemini → groq …) so no API gets a burst:
+
+| Pool | Every | What gets replaced |
+|---|---|---|
+| trivia, scramble | `GAME_AI_TRIVIA_HOURS` (5h) | the **whole** pool — but only if someone played one of its items; unplayed pools cost no quota |
+| math, code | `GAME_AI_STUDY_HOURS` (10h) | **only the questions that were played**; unplayed ones stay |
+
+Failures keep the current pool and back off per category. Built-in questions
+(82 trivia, 116 words, 66 maths concept, 75 programming) and member questions
+are never removed. Groq generation uses `GROQ_TEXT_MODEL` (default
+`openai/gpt-oss-120b`) because Groq retired the old llama-4-scout model.
 
 ### Instant randomness (no round, no scoreboard)
 
@@ -193,8 +199,12 @@ GAMES=on                 # initial state; owner switch persists after first chan
 GAME_TIMEOUT=180         # seconds a round stays open before the reveal
 GAME_COOLDOWN=5          # seconds between rounds (anything > 5 is capped to 5)
 GAME_MAX_ATTEMPTS=12
-GAME_AI_TRIVIA_COUNT=16  # new AI questions per day (1–32)
-GAME_AI_PUZZLE_COUNT=16  # new scramble words/clues per day (1–32)
+GAME_AI_TRIVIA_HOURS=5   # trivia/scramble: renew whole pool if played
+GAME_AI_STUDY_HOURS=10   # math/code: replace played questions
+GAME_AI_TRIVIA_COUNT=16  # batch sizes (1–32 each)
+GAME_AI_PUZZLE_COUNT=16
+GAME_AI_MATH_COUNT=16
+GAME_AI_CODE_COUNT=16
 ```
 
 ---
@@ -206,7 +216,8 @@ GAME_AI_PUZZLE_COUNT=16  # new scramble words/clues per day (1–32)
 |---|---|---|
 | `!quiz` | anyone | solve the attached / replied image right now |
 | `!game` | anyone | every game, plus the score and random commands |
-| `!game <name> [args]` | anyone | start a round: number, dice, coin, slots, math, scramble, trivia, lucky |
+| `!game <name> [args]` | anyone | start a round: number, coin, math, code, scramble, trivia, lucky |
+| `!game mode easy\|hard` | anyone | default math/code level for this chat |
 | `!guess <answer>` (`!g`) | anyone | take a shot in the running round |
 | `!in` | anyone | join a lucky draw |
 | `!top` (`!top all`) | anyone | leaderboard of this chat (or of every chat) |
@@ -215,6 +226,7 @@ GAME_AI_PUZZLE_COUNT=16  # new scramble words/clues per day (1–32)
 | `!game on` | owner | allow all games for members (even after `GAMES=off`) |
 | `!game stop` | owner / round starter | owner: cancel ALL rounds and disable games; starter: end their own round only |
 | `!game reset tops` | owner | reset ALL leaderboards and cancel rounds; preserve questions |
+| `!game reset @member [all]` | owner | reset one member's points (this chat / every chat) |
 | `!game addq Q ; A` | anyone while games are on | add your own trivia question to the pool |
 | `!random` `!roll` `!flip` `!pick` `!shuffle` `!8ball` | anyone | instant randomness, no round needed |
 | `!flag <@person or number> [reason]` | owner | flag a member; stickers and photos (including view-once) are removed by default |
@@ -422,9 +434,10 @@ src/
   quiz.js                 trigger → download → AI → format → send
   format.js               JSON parsing + the per-question layout + chunking
   commands.js             !flag / !unflag / !flags / !guard / !quiz / !stats / !game / !guess / !top
-  games.js                the eight games + rounds, hints, scoring, global controls
+  games.js                the seven games + rounds, hints, scoring, global controls
   scores.js               per-group boards + member questions + owner switch, data/scores.json
-  game-content.js         daily AI trivia/scramble generation + rotation, data/game-content.json
+  game-content.js         batched AI pools (trivia/scramble/math/code)
+  banks.js                built-in maths + programming question banks, data/game-content.json
   random.js               !random / !roll / !flip / !pick / !shuffle / !8ball
   limiter.js              rate limiter + one-solve-per-chat gate
   message.js              pure WAMessage readers (kind, text, quoted, …)
