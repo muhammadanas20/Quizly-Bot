@@ -49,7 +49,9 @@ test('loadConfig: the game settings have sane defaults and accept overrides', ()
     const cfg = loadConfig({});
     assert.equal(cfg.gamesEnabled, true);
     assert.equal(cfg.gameTimeoutMs, 180_000);
-    assert.equal(cfg.gameCooldownMs, 15_000);
+    assert.equal(cfg.gameCooldownMs, 5_000);
+    assert.equal(cfg.gameAiTriviaCount, 16);
+    assert.equal(cfg.gameAiPuzzleCount, 16);
     assert.equal(cfg.gameMaxAttempts, 12);
 
     const tuned = loadConfig({ GAMES: 'off', GAME_TIMEOUT: '60', GAME_COOLDOWN: '5', GAME_MAX_ATTEMPTS: '5' });
@@ -57,6 +59,13 @@ test('loadConfig: the game settings have sane defaults and accept overrides', ()
     assert.equal(tuned.gameTimeoutMs, 60_000);
     assert.equal(tuned.gameCooldownMs, 5_000);
     assert.equal(tuned.gameMaxAttempts, 5);
+
+    // Even an older .env with GAME_COOLDOWN=15 cannot make the wait exceed 5s.
+    assert.equal(loadConfig({ GAME_COOLDOWN: '99' }).gameCooldownMs, 5_000);
+    assert.equal(loadConfig({ GAME_COOLDOWN: '2' }).gameCooldownMs, 2_000);
+    assert.equal(loadConfig({ GAME_COOLDOWN: '0' }).gameCooldownMs, 0);
+    assert.equal(loadConfig({ GAME_AI_TRIVIA_COUNT: '100', GAME_AI_PUZZLE_COUNT: '0' }).gameAiTriviaCount, 32);
+    assert.equal(loadConfig({ GAME_AI_PUZZLE_COUNT: '0' }).gameAiPuzzleCount, 16);
 
     // nonsense falls back instead of producing a 0-second round or a 0-guess cap
     const junk = loadConfig({ GAME_TIMEOUT: 'soon', GAME_MAX_ATTEMPTS: '-3' });

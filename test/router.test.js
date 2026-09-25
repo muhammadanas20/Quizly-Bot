@@ -523,3 +523,45 @@ test('router: a bot-authored game message is never treated as a guess', async ()
     assert.ok(games.active(GROUP), 'the round is untouched by the bot quoting a number');
     assert.equal(sent.filter((s) => s.content.text).length, 1, 'only the round announcement');
 });
+
+test('router: owner global stop/reset via WhatsApp, member cannot operate them', async () => {
+    const { router, games, scores, texts, sent } = world();
+    const other = '120363000000000001@g.us';
+    await router.processMessage(msg({ message: { conversation: '!game number' } }));
+    await router.processMessage(msg({
+        key: { remoteJid: other, participant: TARGET, fromMe: false, id: 'OTHER' },
+        message: { conversation: '!game lucky' }
+    }));
+    assert.equal(games.roundCount, 2);
+
+    await router.processMessage(msg({ message: { conversation: '!game reset tops' } }));
+    assert.match(texts().at(-1), /Only the bot owner/);
+    await router.processMessage(ownCmd('!game stop'));
+    assert.equal(games.roundCount, 0);
+    assert.equal(games.enabled, false);
+    assert.match(texts().at(-1), /Games are OFF/);
+    assert.ok(sent.some((s) => s.jid === other && /cancelled/.test(s.content.text)));
+
+    await router.processMessage(msg({ message: { conversation: '!game on' } }));
+    assert.match(texts().at(-1), /Only the bot owner/);
+    await router.processMessage(msg({ message: { conversation: '!guess 51' } }));
+    assert.match(texts().at(-1), /Games are OFF/);
+    assert.equal(scores.playerOf(other, ['923009876543']).points, 1);
+    await router.processMessage(ownCmd('!game reset tops'));
+    assert.equal(scores.playerCount, 0);
+    assert.equal(games.enabled, false, 'reset leaves the global switch unchanged');
+    await router.processMessage(ownCmd('!game on'));
+    assert.equal(games.enabled, true);
+    await router.processMessage(msg({ message: { conversation: '!game number' } }));
+    assert.ok(games.active(GROUP), 'members can start rounds again');
+});
+
+test('router: !game on works even if GAMES=off at startup', async () => {
+    const { router, games, texts } = world({ env: { GAMES: 'off' } });
+    await router.processMessage(msg({ message: { conversation: '!game dice' } }));
+    assert.match(texts().at(-1), /Games are OFF/);
+    await router.processMessage(ownCmd('!game on'));
+    assert.equal(games.enabled, true);
+    await router.processMessage(msg({ message: { conversation: '!game dice' } }));
+    assert.equal(games.active(GROUP).name, 'dice');
+});

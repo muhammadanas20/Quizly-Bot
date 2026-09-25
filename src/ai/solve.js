@@ -19,17 +19,23 @@ function extrasFor(provider, cfg) {
     return {};
 }
 
-export async function solveQuiz({ image, config, log, fetchImpl }) {
+export const solveQuiz = ({ image, config, log, fetchImpl }) =>
+    runAI({ image, prompt: QUIZ_PROMPT, config, log, fetchImpl });
+
+/** Also used for the once-a-day, text-only trivia + scramble refresh. */
+export async function runAI({ image, prompt, config, log, fetchImpl, signal, maxTokens = config.aiMaxTokens, responseSchema, validate }) {
     const attempts = [];
     let triedAny = false;
 
     for (const provider of config.aiOrder) {
+        if (signal?.aborted) return { ok: false, attempts, summary: 'AI request cancelled.' };
         const cfg = config[provider];
         if (!cfg?.key) continue;
 
         const models = [cfg.model, ...(cfg.fallbacks || [])].filter(Boolean);
 
         for (const model of models) {
+            if (signal?.aborted) return { ok: false, attempts, summary: 'AI request cancelled.' };
             triedAny = true;
             const started = Date.now();
             try {
@@ -38,26 +44,34 @@ export async function solveQuiz({ image, config, log, fetchImpl }) {
                         apiKey         : cfg.key,
                         model,
                         image,
-                        prompt         : QUIZ_PROMPT,
+                        prompt,
                         timeoutMs      : config.aiTimeoutMs,
-                        maxTokens      : config.aiMaxTokens,
+                        maxTokens,
                         thinkingBudget : cfg.thinkingBudget,
-                        fetchImpl
+                        responseSchema,
+                        fetchImpl,
+                        signal
                     })
                     : await callOpenAICompat({
                         name      : provider,
                         apiKey    : cfg.key,
                         model,
                         image,
-                        prompt    : QUIZ_PROMPT,
+                        prompt,
                         timeoutMs : config.aiTimeoutMs,
-                        maxTokens : config.aiMaxTokens,
+                        maxTokens,
                         extras    : extrasFor(provider, cfg),
-                        fetchImpl
+                        fetchImpl,
+                        signal
                     });
 
-                return { ok: true, ...out, ms: Date.now() - started, attempts };
+                if (signal?.aborted) return { ok: false, attempts, summary: 'AI request cancelled.' };
+                // Invalid/incomplete daily content must fall through to the next
+                // configured provider, not overwrite yesterday's valid pool.
+                const data = validate ? await validate(out) : undefined;
+                return { ok: true, ...out, ...(validate ? { data } : {}), ms: Date.now() - started, attempts };
             } catch (err) {
+                if (signal?.aborted) return { ok: false, attempts, summary: 'AI request cancelled.' };
                 const attempt = {
                     provider,
                     model,
@@ -68,8 +82,8 @@ export async function solveQuiz({ image, config, log, fetchImpl }) {
                 attempts.push(attempt);
                 log?.warn?.(`ai: ${provider}/${model} failed [${attempt.kind}] ${err.message}`);
 
-                if (attempt.kind === 'model') continue;   // retired/unknown model → next in list
-                break;                                    // otherwise → next provider
+                if (attempt.kind === 'model' || attempt.kind === 'bad_response') continue;
+                break; // other failures → next provider (including quota/auth/timeouts)
             }
         }
     }
@@ -78,22 +92,24 @@ export async function solveQuiz({ image, config, log, fetchImpl }) {
         return {
             ok      : false,
             attempts,
-            summary : 'No AI provider is configured. Add GEMINI_API_KEY or XAI_API_KEY to the .env file.'
+            summary : 'No AI provider is configured. Add GROQ_API_KEY, GEMINI_API_KEY or XAI_API_KEY to the .env file.'
         };
     }
 
-    return { ok: false, attempts, summary: summarise(attempts) };
+    return { ok: false, attempts, summary: summarise(attempts, { hasImage: Boolean(image) }) };
 }
 
 /** Turn a list of failures into one line a human can act on. */
-export function summarise(attempts) {
+export function summarise(attempts, { hasImage = true } = {}) {
     if (!attempts.length) return 'No AI provider is configured.';
     const last = attempts[attempts.length - 1];
     const kinds = new Set(attempts.map((a) => a.kind));
 
-    if (kinds.has('auth'))    return 'API key rejected. Check GEMINI_API_KEY / XAI_API_KEY in .env.';
-    if (kinds.has('rate'))    return 'AI rate limit hit on every provider. Try again in a minute.';
-    if (kinds.has('timeout')) return 'The AI timed out. The image may be very large — send a smaller screenshot.';
+    if (kinds.has('auth'))    return 'API key rejected. Check GROQ_API_KEY / GEMINI_API_KEY / XAI_API_KEY in .env.';
+    if (kinds.has('rate'))    return 'AI rate limit hit on every provider. Try again later.';
+    if (kinds.has('timeout')) return hasImage
+        ? 'The AI timed out. The image may be very large — send a smaller screenshot.'
+        : 'The AI timed out while preparing game content. The bot will retry later.';
     if (kinds.has('network')) return 'The VM could not reach the AI servers. Check outbound internet / DNS.';
     if (kinds.has('model'))   return 'Every configured model id was rejected. Run `npm run check` to list valid ones.';
 

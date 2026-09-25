@@ -62,6 +62,8 @@ test('!help advertises the games, the score commands and the randomness', async 
     assert.match(out.reply, /!top/);
     assert.match(out.reply, /!8ball/);
     assert.match(out.reply, /Owner only/);
+    assert.match(out.reply, /!game on/);
+    assert.match(out.reply, /!game reset tops/);
 });
 
 test('game commands answer politely when the games are switched off', async () => {

@@ -111,9 +111,9 @@ scoreboard every member contributes to:
 | 🎲 `dice` | `!game dice` | guess the face of one die, 1-6 | 6 |
 | 🪙 `coin` | `!game coin` | call heads or tails on a coin that is already in the air | 2 |
 | 🎰 `slots` | `!game slots` | pick a lucky digit 1-9; three random reels pay a pair or three of a kind | 3 / 15 |
-| ➗ `math` | `!game math [hard]` | first correct answer to a random sum | 5 easy / 8 hard |
-| 🔤 `scramble` | `!game scramble` | first correct answer to a scrambled word | 5 |
-| 🧠 `trivia` | `!game trivia` | first correct answer — built-in questions plus the members' own | 5 |
+| ➗ `math` | `!game math [hard]` | first correct answer; hard mode mixes multi-step arithmetic and exact division | 5 easy / 10 hard |
+| 🔤 `scramble` | `!game scramble` | first correct answer to a shuffled word (some have clues) | 5 |
+| 🧠 `trivia` | `!game trivia` | first correct answer — built-in, member and rotating AI questions | 5 |
 | 🎁 `lucky` | `!game lucky` → `!in` → `!game draw` | a random entrant is drawn | 8 |
 
 **Everyone can play and everyone scores**
@@ -132,9 +132,11 @@ shorter spelling. A wrong guess is a single ❌ reaction — the number game ans
 a direction and how warm you are, and nothing else spams the chat.
 
 **Rounds end themselves.** Every round reveals the answer when it times out
-(`GAME_TIMEOUT`, 180 s by default, announced by the bot even if nobody is typing), or
-when the starter or the bot owner sends `!game stop`. A second round in the same chat
-waits for the first; the member who started it (or the owner) can replace it.
+(`GAME_TIMEOUT`, 180 s by default, announced by the bot even if nobody is typing).
+The starter can end *their chat's* round with `!game end` (or `!game stop`); the owner
+can use `!game end` to end one round, or `!game stop` to cancel **all active rounds**
+and close games for everyone. The wait between rounds is **at most 5 seconds**;
+only the starter or owner may replace a round while it is still running.
 
 **Members add to the game, not just play it.** `!game addq Question ; Answer` puts your
 own question into the trivia pool (`/` separates accepted spellings) — it is drawn
@@ -145,6 +147,33 @@ contributes are worth +2 points each:
 !game addq Which city is the capital of Japan? ; Tokyo
 !game trivia
 ```
+
+**Owner controls (global, persistent):**
+
+| Command | Effect |
+|---|---|
+| `!game on` | Allow members in every chat to start/play games; works even when `GAMES=off` in `.env` |
+| `!game stop` | Turn games off in every chat and cancel all open rounds (no lucky-draw payout); other active chats get a cancellation notice |
+| `!game reset tops` | Clear **all** chat/global leaderboards and cancel open rounds; keep contributed questions and leave games on/off unchanged |
+| `!game end` | End only the current chat's round, without changing the global switch |
+| `!game status` | Anyone can see whether games are on and how many daily AI questions/puzzles are ready |
+
+Only numbers in `OWNER_NUMBERS` (or the bot's own account) may use the first three
+commands. A round starter may still use `!game stop` to end **their own** round,
+not the global game switch. Scores/owner settings survive restarts in
+`DATA_DIR/scores.json`; `!top` and `!game me` remain readable while games are off.
+
+**Fresh content every day:** The shipped pools now include 82 trivia questions and
+116 scramble words. While games are enabled, one text-only AI request through
+`AI_ORDER` creates up to 16 more trivia questions and 16 word/clue puzzles every
+24 hours. Validated content is saved in `DATA_DIR/game-content.json`; a successful
+refresh **replaces yesterday's generated questions/puzzles** rather than growing the
+file forever. Built-ins and member-submitted questions are never deleted; repeated
+questions and scramble words are filtered against shipped/member/previous content.
+If the AI is unavailable, malformed or rate-limited, the bot keeps the current pool
+and retries later with bounded backoff. Rounds already in progress keep their answer.
+`GAME_AI_TRIVIA_COUNT` / `GAME_AI_PUZZLE_COUNT` tune the requested batch size
+(maximum 32 each); the refresh uses your existing AI key/quota, not a new service.
 
 ### Instant randomness (no round, no scoreboard)
 
@@ -160,10 +189,12 @@ contributes are worth +2 points each:
 ### Game settings in `.env`
 
 ```env
-GAMES=on            # off = the bot only does quiz + guard
-GAME_TIMEOUT=180    # seconds a round stays open before the reveal
-GAME_COOLDOWN=15    # breather between rounds (also the participation-point window)
+GAMES=on                 # initial state; owner switch persists after first change
+GAME_TIMEOUT=180         # seconds a round stays open before the reveal
+GAME_COOLDOWN=5          # seconds between rounds (anything > 5 is capped to 5)
 GAME_MAX_ATTEMPTS=12
+GAME_AI_TRIVIA_COUNT=16  # new AI questions per day (1–32)
+GAME_AI_PUZZLE_COUNT=16  # new scramble words/clues per day (1–32)
 ```
 
 ---
@@ -179,9 +210,12 @@ GAME_MAX_ATTEMPTS=12
 | `!guess <answer>` (`!g`) | anyone | take a shot in the running round |
 | `!in` | anyone | join a lucky draw |
 | `!top` (`!top all`) | anyone | leaderboard of this chat (or of every chat) |
-| `!game me` | anyone | your own score card |
-| `!game stop` | round starter / owner | end the round early |
-| `!game addq Q ; A` | anyone | add your own trivia question to the pool |
+| `!game me` / `!game status` | anyone | your score card / current game status |
+| `!game end` | round starter / owner | end this chat's round early |
+| `!game on` | owner | allow all games for members (even after `GAMES=off`) |
+| `!game stop` | owner / round starter | owner: cancel ALL rounds and disable games; starter: end their own round only |
+| `!game reset tops` | owner | reset ALL leaderboards and cancel rounds; preserve questions |
+| `!game addq Q ; A` | anyone while games are on | add your own trivia question to the pool |
 | `!random` `!roll` `!flip` `!pick` `!shuffle` `!8ball` | anyone | instant randomness, no round needed |
 | `!flag <@person or number> [reason]` | owner | flag a member; stickers and photos (including view-once) are removed by default |
 | `!unflag <@person or number>` | owner | remove a flag |
@@ -325,9 +359,12 @@ Additional memory work:
 * `scripts/setup-vm.sh` creates a **2 GiB swap file** and sets `vm.swappiness=10`.
 * One solve per chat at a time; duplicate triggers are dropped, not queued.
 * Group admin status is cached for 10 minutes so the guard never adds a round trip.
-* Game rounds live in memory only — a round is short-lived, so only the scoreboard
-  (`data/scores.json`, debounced writes) touches the disk. One `Map` lookup decides
-  whether an ordinary message is a guess, so games cost the guard path nothing.
+* Game rounds live in memory; scores and the persisted owner switch use
+  `data/scores.json` (debounced point writes, immediate atomic reset/toggle), and
+  the bounded daily AI pool uses `data/game-content.json` (atomic replacement).
+  One `Map` lookup decides whether an ordinary message is a guess, so games do
+  not add work to the guard path. The AI refresh is background-only and pauses
+  while games are off.
 
 Check it yourself on the VM: `pm2 monit` or `free -h`.
 
@@ -385,8 +422,9 @@ src/
   quiz.js                 trigger → download → AI → format → send
   format.js               JSON parsing + the per-question layout + chunking
   commands.js             !flag / !unflag / !flags / !guard / !quiz / !stats / !game / !guess / !top
-  games.js                the eight games + rounds, hints, scoring, leaderboards
-  scores.js               per-group scoreboard + contributed trivia, data/scores.json
+  games.js                the eight games + rounds, hints, scoring, global controls
+  scores.js               per-group boards + member questions + owner switch, data/scores.json
+  game-content.js         daily AI trivia/scramble generation + rotation, data/game-content.json
   random.js               !random / !roll / !flip / !pick / !shuffle / !8ball
   limiter.js              rate limiter + one-solve-per-chat gate
   message.js              pure WAMessage readers (kind, text, quoted, …)

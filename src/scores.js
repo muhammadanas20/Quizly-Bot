@@ -9,15 +9,17 @@
  *                             (Baileys 7 gives the same human a phone-number JID
  *                             and/or a LID — the same trap !flag had to solve)
  *   questions[]               trivia questions contributed by members
+ *   settings.gamesEnabled     owner switch; survives a restart independently of GAMES
  *
- * Like the flag store, writes are debounced: game rounds award points on nearly
- * every message, and a disk write per point would be silly on a 1 GiB VM.
+ * Generated daily content lives separately in game-content.json, so resetting
+ * leaderboards can never delete member questions or the current AI pool.
+ * Writes for points are debounced; owner switches and resets flush immediately.
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 
-const VERSION = 1;
+const VERSION = 2;
 const SAVE_DELAY_MS = 1500;
 const MAX_QUESTIONS = 500;
 const QUESTION_MAX_LEN = 200;
@@ -41,7 +43,7 @@ export function canonicalKey(ids) {
 const clean = (s, max) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 
 export function createScoreStore({ file, log, maxQuestions = MAX_QUESTIONS } = {}) {
-    let data = { version: VERSION, chats: {}, questions: [] };
+    let data = { version: VERSION, chats: {}, questions: [], settings: {} };
     let saveTimer = null;
 
     // ── persistence ──────────────────────────────────────────────────────────
@@ -54,7 +56,10 @@ export function createScoreStore({ file, log, maxQuestions = MAX_QUESTIONS } = {
                     data = {
                         version  : VERSION,
                         chats    : parsed.chats && typeof parsed.chats === 'object' ? parsed.chats : {},
-                        questions: Array.isArray(parsed.questions) ? parsed.questions : []
+                        questions: Array.isArray(parsed.questions) ? parsed.questions : [],
+                        settings : typeof parsed.settings?.gamesEnabled === 'boolean'
+                            ? { gamesEnabled: parsed.settings.gamesEnabled }
+                            : {}
                     };
                 }
             }
@@ -66,12 +71,17 @@ export function createScoreStore({ file, log, maxQuestions = MAX_QUESTIONS } = {
 
     function flush() {
         if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
-        if (!file) return;
+        if (!file) return true;
+        const temporary = `${file}.tmp`;
         try {
             fs.mkdirSync(path.dirname(file), { recursive: true });
-            fs.writeFileSync(file, JSON.stringify(data, null, 2));
+            fs.writeFileSync(temporary, JSON.stringify(data));
+            fs.renameSync(temporary, file); // never leave a half-written scoreboard
+            return true;
         } catch (err) {
             log?.error?.(`score store: could not write ${file}: ${err.message}`);
+            try { fs.unlinkSync(temporary); } catch { /* no temporary file */ }
+            return false;
         }
     }
 
@@ -79,6 +89,21 @@ export function createScoreStore({ file, log, maxQuestions = MAX_QUESTIONS } = {
         if (saveTimer) return;
         saveTimer = setTimeout(() => { saveTimer = null; flush(); }, SAVE_DELAY_MS);
         saveTimer.unref?.();       // a pending write must not keep Node alive
+    }
+
+    /** A persisted owner override wins over the initial GAMES setting. */
+    const gamesEnabled = (fallback = true) => data.settings.gamesEnabled ?? fallback;
+
+    function setGamesEnabled(enabled) {
+        data.settings.gamesEnabled = Boolean(enabled);
+        return flush();           // a control command must survive an immediate restart
+    }
+
+    /** Clear ALL chats, their scores/streaks and their identity aliases only. */
+    function resetBoards() {
+        const players = Object.values(data.chats).reduce((n, c) => n + Object.keys(c.players || {}).length, 0);
+        data.chats = {};
+        return { players, saved: flush() }; // questions and owner settings stay put
     }
 
     // ── chats / players ──────────────────────────────────────────────────────
@@ -292,6 +317,9 @@ export function createScoreStore({ file, log, maxQuestions = MAX_QUESTIONS } = {
     const api = {
         load,
         flush,
+        gamesEnabled,
+        setGamesEnabled,
+        resetBoards,
         chatOf,
         register,
         playerOf,
