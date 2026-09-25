@@ -8,11 +8,11 @@
  *   chats[jid].aliases[id]    every identity that person is known by → player key
  *                             (Baileys 7 gives the same human a phone-number JID
  *                             and/or a LID — the same trap !flag had to solve)
- *   questions[]               trivia questions contributed by members
+ *   questions[]               trivia questions contributed by the owner
  *   settings.gamesEnabled     owner switch; survives a restart independently of GAMES
  *
  * Generated daily content lives separately in game-content.json, so resetting
- * leaderboards can never delete member questions or the current AI pool.
+ * leaderboards can never delete contributed questions or the current AI pool.
  * Writes for points are debounced; owner switches and resets flush immediately.
  */
 
@@ -311,7 +311,7 @@ export function createScoreStore({ file, log, maxQuestions = MAX_QUESTIONS } = {
         return { players: rows.length, points: rows.reduce((n, r) => n + r.points, 0) };
     };
 
-    // ── member-contributed trivia questions ─────────────────────────────────
+    // ── owner-contributed trivia questions ──────────────────────────────────
     /**
      * @param {{q:string, a:string|string[], by?:string, byKey?:string, chat?:string}} entry
      * @returns {{ok:boolean, error?:string, entry?:object}}

@@ -14,7 +14,7 @@
  *   !game end                  end this chat's round (starter or owner)
  *   !game top [all]            leaderboard — this chat, or everywhere
  *   !game me                   your own score card
- *   !game addq Q ; A           contribute a trivia question to the pool
+ *   !game addq Q ; A           owner: contribute a trivia question to the pool
  *
  * Seven games: number, coin, math, code, scramble, trivia, lucky.
  * Everyone plays, everyone scores (every attempt earns a participation point),
@@ -212,7 +212,7 @@ export const GAMES = Object.freeze([
         name: 'trivia', aliases: ['trivia', 'question', 'q', 'quiz'], emoji: '🧠', mode: 'race',
         title: 'Trivia', points: GAME_POINTS.trivia,
         how: '!game trivia → send the answer',
-        blurb: 'General knowledge, plus the questions members contributed. 5 pts.'
+        blurb: 'General knowledge, plus the questions the owner contributed. 5 pts.'
     },
     {
         name: 'lucky', aliases: ['lucky', 'draw', 'raffle', 'lottery', 'giveaway'], emoji: '🎁', mode: 'lucky',
@@ -520,10 +520,9 @@ export function createGameEngine({
             '!game me         your own score card',
             '!game end        starter: end this chat’s round',
             '!game status     games on/off + rotating question counts',
-            `!game addq Q ; A  contribute a trivia question (+${CONTRIBUTION_POINTS} pts)`,
             '!game mode easy|hard  math + code level for this chat',
             '```',
-            '_Owner: !game on · !game stop (all chats) · !game reset tops (all boards) · !game reset @member [all]_',
+            `_Owner: !game on · !game stop (all chats) · !game reset tops (all boards) · !game reset @member [all] · !game addq Q ; A (+${CONTRIBUTION_POINTS} pts)_`,
             `Quick random: !random [n|1-100|a, b, c] · !roll 2d6 · !flip · !pick a, b · !shuffle a, b · !8ball <question>`
         );
         return lines.join('\n');
@@ -541,7 +540,7 @@ export function createGameEngine({
             'Everyone who takes part is on the scoreboard; the first right answer',
             'wins the round, and wrong guesses get hints. One game per chat at a',
             'time — the round also ends by itself if nobody finds it in time.',
-            'The built-in pool, member questions and a daily rotating AI pool keep rounds fresh.'
+            'The built-in pool, contributed questions and a daily rotating AI pool keep rounds fresh.'
         );
         return lines.join('\n');
     }
@@ -1209,10 +1208,14 @@ export function createGameEngine({
         if (sub === 'me' || sub === 'mine' || sub === 'stats') {
             return { handled: true, reply: meText(ctx) };
         }
-        if (!enabled) return gamesOff();
+        // addq is dispatched before the games switch on purpose: it is
+        // owner-only, and the owner check inside addQuestion has to answer
+        // before "games are off" can — otherwise a member is told to wait for
+        // the owner to reopen games, as if that would let them contribute.
         if (sub === 'addq' || sub === 'add' || sub === 'contribute') {
             return addQuestion(ctx, args.slice(1));
         }
+        if (!enabled) return gamesOff();
         if (sub === 'stop' || sub === 'end' || sub === 'quit' || sub === 'cancel') {
             return stopRound(ctx);
         }
@@ -1397,11 +1400,18 @@ export function createGameEngine({
 
     // ── contributed trivia ───────────────────────────────────────────────────
     /**
-     * Members add to the game, not just play it. A question lands in the shared
-     * trivia pool, and the first few contributions earn points — capped, so the
-     * pool cannot be used as a point farm.
+     * The trivia pool is curated, not crowdsourced: only the owner (a number in
+     * OWNER_NUMBERS, or the bot's own account) may add to it, so the questions
+     * everyone plays stay under one person's control. A question lands in the
+     * shared pool, and the first few contributions still earn points — capped,
+     * so the pool cannot be used as a point farm.
+     *
+     * The owner check comes first, before the games switch and before any
+     * parsing: a non-owner gets the same ⛔ whether games are on or off, and
+     * never learns whether their text would have parsed.
      */
     function addQuestion(ctx, args) {
+        if (!ctx.isOwner) return ownerOnly();
         if (!enabled) return gamesOff();
         const raw = args.join(' ').trim();
         const split = raw.match(/^(.*?)\s*(?:;|\||->)\s*(.+)$/);

@@ -137,10 +137,13 @@ can use `!game end` to end one round, or `!game stop` to cancel **all active rou
 and close games for everyone. The wait between rounds is **at most 5 seconds**;
 only the starter or owner may replace a round while it is still running.
 
-**Members add to the game, not just play it.** `!game addq Question ; Answer` puts your
-own question into the trivia pool (`/` separates accepted spellings) — it is drawn
-alongside the built-in questions from then on, and the first ten questions a member
-contributes are worth +2 points each:
+**The trivia pool is owner-curated.** `!game addq Question ; Answer` puts a question
+into the trivia pool (`/` separates accepted spellings) — it is drawn alongside the
+built-in questions from then on. **Only you can add questions:** a number in
+`OWNER_NUMBERS`, or the bot's own account. Any other member who tries it gets a single
+⛔ reaction and `Only the bot owner can use that command.`, and their text never reaches
+the pool. The gate answers before the games switch, so it reads the same whether games
+are on or off. The first ten questions you add are still worth +2 points each:
 
 ```
 !game addq Which city is the capital of Japan? ; Tokyo
@@ -177,7 +180,7 @@ next provider (groq → gemini → groq …) so no API gets a burst:
 | math, code | `GAME_AI_STUDY_HOURS` (10h) | **only the questions that were played**; unplayed ones stay |
 
 Failures keep the current pool and back off per category. Built-in questions
-(82 trivia, 116 words, 66 maths concept, 75 programming) and member questions
+(82 trivia, 116 words, 66 maths concept, 75 programming) and contributed questions
 are never removed. Groq generation uses `GROQ_TEXT_MODEL` (default
 `openai/gpt-oss-120b`) because Groq retired the old llama-4-scout model.
 
@@ -227,7 +230,7 @@ GAME_AI_CODE_COUNT=16
 | `!game stop` | owner / round starter | owner: cancel ALL rounds and disable games; starter: end their own round only |
 | `!game reset tops` | owner | reset ALL leaderboards and cancel rounds; preserve questions |
 | `!game reset @member [all]` | owner | reset one member's points (this chat / every chat) |
-| `!game addq Q ; A` | anyone while games are on | add your own trivia question to the pool |
+| `!game addq Q ; A` | owner | add a trivia question to the pool (`add` / `contribute` work too) |
 | `!random` `!roll` `!flip` `!pick` `!shuffle` `!8ball` | anyone | instant randomness, no round needed |
 | `!flag <@person or number> [reason]` | owner | flag a member; stickers and photos (including view-once) are removed by default |
 | `!unflag <@person or number>` | owner | remove a flag |
@@ -435,7 +438,7 @@ src/
   format.js               JSON parsing + the per-question layout + chunking
   commands.js             !flag / !unflag / !flags / !guard / !quiz / !stats / !game / !guess / !top
   games.js                the seven games + rounds, hints, scoring, global controls
-  scores.js               per-group boards + member questions + owner switch, data/scores.json
+  scores.js               per-group boards + contributed questions + owner switch, data/scores.json
   game-content.js         batched AI pools (trivia/scramble/math/code)
   banks.js                built-in maths + programming question banks, data/game-content.json
   random.js               !random / !roll / !flip / !pick / !shuffle / !8ball

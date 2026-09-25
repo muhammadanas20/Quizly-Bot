@@ -384,11 +384,13 @@ test('trivia and scramble use the latest AI pool; an active round keeps its orig
 
 test('!game addq needs a question and an answer, and refuses duplicates', async () => {
     const { games, scores } = world();
+    // Only the owner may contribute, so the happy path is typed as owner.
+    const asOwner = (text, args) => games.handle(asAli(text, { isOwner: true }), args);
 
-    const usage = await games.handle(asAli('!game addq no separator here'), ['addq', 'no', 'separator', 'here']);
+    const usage = await asOwner('!game addq no separator here', ['addq', 'no', 'separator', 'here']);
     assert.match(usage.reply, /Usage: `?!game addq Question ; Answer/);
 
-    const ok = await games.handle(asAli('!game addq Which planet has rings? ; Saturn/ringed'), ['addq', 'Which', 'planet', 'has', 'rings?', ';', 'Saturn/ringed']);
+    const ok = await asOwner('!game addq Which planet has rings? ; Saturn/ringed', ['addq', 'Which', 'planet', 'has', 'rings?', ';', 'Saturn/ringed']);
     assert.equal(ok.react, '✅');
     assert.match(ok.reply, /Added to the trivia pool/);
     assert.match(ok.reply, /\*\+2\* pts for contributing/, 'contributing scores too');
@@ -397,7 +399,7 @@ test('!game addq needs a question and an answer, and refuses duplicates', async 
     assert.equal(scores.questions()[0].by, 'Ali');
     assert.equal(scores.playerOf(GROUP, [PN]).points, 2);
 
-    const dupe = await games.handle(asAli('!game addq which planet has rings? ; Saturn'), ['addq', 'which', 'planet', 'has', 'rings?', ';', 'Saturn']);
+    const dupe = await asOwner('!game addq which planet has rings? ; Saturn', ['addq', 'which', 'planet', 'has', 'rings?', ';', 'Saturn']);
     assert.equal(dupe.react, '⚠️');
     assert.match(dupe.reply, /already in the pool/);
 });
@@ -407,7 +409,7 @@ test('contributing is rewarded, but only for the first ten questions', async () 
 
     for (let i = 1; i <= 11; i++) {
         const out = await games.handle(
-            asAli(`!game addq Question number ${i}? ; answer ${i}`),
+            asAli(`!game addq Question number ${i}? ; answer ${i}`, { isOwner: true }),
             ['addq', `Question number ${i}?`, ';', `answer ${i}`]
         );
         if (i <= 10) assert.match(out.reply, /for contributing/, `question ${i} earns points`);
@@ -417,6 +419,52 @@ test('contributing is rewarded, but only for the first ten questions', async () 
     assert.equal(scores.questionCount, 11, 'every question is still added to the pool');
     assert.equal(scores.playerOf(GROUP, [PN]).points, 10 * 2, 'capped at ten paid contributions');
     assert.equal(scores.questions()[10].byKey, PN, 'the contributor key is stored with the question');
+});
+
+test('only the owner may contribute a question with !game addq', async () => {
+    const { games, scores } = world();
+
+    // A member with a perfectly well-formed question is still refused.
+    const member = await games.handle(
+        asSana('!game addq Which city is the capital of Japan? ; Tokyo'),
+        ['addq', 'Which', 'city', 'is', 'the', 'capital', 'of', 'Japan?', ';', 'Tokyo']
+    );
+    assert.equal(member.handled, true, 'the refusal still consumes the command');
+    assert.equal(member.react, '⛔');
+    assert.match(member.reply, /Only the bot owner can use that command/);
+
+    assert.equal(scores.questionCount, 0, 'nothing reaches the pool');
+    assert.equal(scores.playerOf(GROUP, [PN2])?.points ?? 0, 0, 'and nobody is paid for it');
+
+    // The owner is let through, and the aliases obey the same gate.
+    for (const alias of ['add', 'contribute']) {
+        const denied = await games.handle(asSana(`!game ${alias} Q? ; A`), [alias, 'Q?', ';', 'A']);
+        assert.equal(denied.react, '⛔', `!game ${alias} is gated too`);
+    }
+    assert.equal(scores.questionCount, 0);
+
+    const owner = await games.handle(
+        asAli('!game addq Which city is the capital of Japan? ; Tokyo', { isOwner: true }),
+        ['addq', 'Which', 'city', 'is', 'the', 'capital', 'of', 'Japan?', ';', 'Tokyo']
+    );
+    assert.equal(owner.react, '✅');
+    assert.equal(scores.questionCount, 1);
+    assert.deepEqual(scores.questions()[0].a, ['Tokyo']);
+});
+
+test('a non-owner gets the same ⛔ for addq whether games are on or off', async () => {
+    const { games, tick, config } = world();
+
+    const on = await games.handle(asSana('!game addq Q? ; A'), ['addq', 'Q?', ';', 'A']);
+    assert.match(on.reply, /Only the bot owner/);
+
+    await games.handle(asAli('!game stop', { isOwner: true }), ['stop']);
+    assert.equal(games.enabled, false);
+    tick(config.gameCooldownMs + 1);
+
+    const off = await games.handle(asSana('!game addq Q? ; A'), ['addq', 'Q?', ';', 'A']);
+    assert.equal(off.react, '⛔', 'the owner gate answers before the games switch');
+    assert.match(off.reply, /Only the bot owner/, 'not "Games are OFF"');
 });
 
 // ── lucky draw ───────────────────────────────────────────────────────────────
@@ -612,7 +660,10 @@ test('!game stop by the owner cancels ALL chats without drawing winners, and !ga
     assert.match((await games.handle(asSana('!game number'), ['number'])).reply, /Games are OFF/);
     assert.match((await games.guess(asSana('!guess 51'), ['51'])).reply, /Games are OFF/);
     assert.match((await games.join(asSana('!in'))).reply, /Games are OFF/);
-    assert.match((await games.handle(asSana('!game addq A question? ; An answer'), ['addq', 'A question?', ';', 'An answer'])).reply, /Games are OFF/);
+    // addq is owner-only, so the owner gate answers before the games switch…
+    assert.match((await games.handle(asSana('!game addq A question? ; An answer'), ['addq', 'A question?', ';', 'An answer'])).reply, /Only the bot owner/);
+    // …while the owner still hears that games are off.
+    assert.match((await games.handle(asAli('!game addq A question? ; An answer', { isOwner: true }), ['addq', 'A question?', ';', 'An answer'])).reply, /Games are OFF/);
     assert.deepEqual(await games.handleMessage(asSana('51')), { handled: false });
     assert.match((await games.handle(asSana('!game status'), ['status'])).reply, /Games: \*OFF\*/);
     assert.match(games.board(asSana('!top', { jid: OTHER })), /Sana/, 'existing board remains readable');
