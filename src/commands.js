@@ -10,7 +10,7 @@
  *   !ping  !stats                        anyone
  *
  *   !game [list|help|top|me|end|addq|name]   anyone — the game engine (games.js)
- *   !game on|stop|reset tops                owner — global game controls
+ *   !game on|stop|reset tops|reset @member  owner — game controls
  *   !guess <answer>  !in  !top               anyone — those games' shortcuts
  *   !random !roll !flip !pick !shuffle !8ball  anyone — instant randomness
  *
@@ -80,8 +80,11 @@ export const HELP_TEXT = [
     '*Games — everyone can play*',
     '```',
     `${PREFIX}game                   every game + the commands`,
-    `${PREFIX}game <name>            start a round (number, dice, coin, slots,`,
-    '                       math, scramble, trivia, lucky)',
+    `${PREFIX}game <name>            start a round (number, coin, math, code,`,
+    '                       scramble, trivia, lucky)',
+    `${PREFIX}game math hard linear   maths: linear algebra / calc / mvc`,
+    `${PREFIX}game code easy coal     programming: pf / oop / ds / coal`,
+    `${PREFIX}game mode easy|hard    default level for math + code here`,
     `${PREFIX}guess <answer>         take a shot (!g works too)`,
     `${PREFIX}in                     join a lucky draw`,
     `${PREFIX}top                    leaderboard of this chat (${PREFIX}top all = global)`,
@@ -112,6 +115,7 @@ export const HELP_TEXT = [
     `${PREFIX}game on                open all games for members`,
     `${PREFIX}game stop              stop every active game and turn games off`,
     `${PREFIX}game reset tops        reset ALL leaderboards (keeps questions)`,
+    `${PREFIX}game reset @member     reset one member's points here (add "all" = every chat)`,
     '```',
     '',
     'The guard never replies in the group — flagged stickers and photos just disappear.'

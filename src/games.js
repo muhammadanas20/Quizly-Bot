@@ -9,12 +9,14 @@
  *   !game stop                 owner: stop ALL games; starter: end this round
  *   !game on                   owner: reopen games for everyone
  *   !game reset tops           owner: clear every leaderboard
+ *   !game reset @member [all]  owner: reset one member's points (this chat / all chats)
+ *   !game mode easy|hard       set this chat's default level for math + code
  *   !game end                  end this chat's round (starter or owner)
  *   !game top [all]            leaderboard — this chat, or everywhere
  *   !game me                   your own score card
  *   !game addq Q ; A           contribute a trivia question to the pool
  *
- * Eight random games: number, dice, coin, slots, math, scramble, trivia, lucky.
+ * Seven games: number, coin, math, code, scramble, trivia, lucky.
  * Everyone plays, everyone scores (every attempt earns a participation point),
  * and the scoreboard is per group so a big group's leaderboard means something.
  *
@@ -27,7 +29,9 @@
  * socket, in keeping with the rest of this codebase.
  */
 
-import { randomInt, pickOne, shuffle, slotReels, parseRange, parseCoinCall } from './random.js';
+import { randomInt, pickOne, shuffle, parseRange, parseCoinCall } from './random.js';
+import { MATH_BANK, CODE_BANK, parseTopic } from './banks.js';
+import { normalizeId } from './config.js';
 
 // ─── Words for !game scramble ────────────────────────────────────────────────
 export const WORDS = Object.freeze([
@@ -156,10 +160,9 @@ export const TRIVIA = Object.freeze([
 /** Winner points per game. A round can be lost, never the scoreboard. */
 export const GAME_POINTS = Object.freeze({
     number : 10,
-    dice   : 6,
     coin   : 2,
-    slots  : 15,
     math   : 5,
+    code   : 5,
     scramble: 5,
     trivia : 5,
     lucky  : 8
@@ -182,28 +185,22 @@ export const GAMES = Object.freeze([
         blurb: 'A secret number, too-high/too-low hints, hot-and-cold feedback, 10 pts.'
     },
     {
-        name: 'dice', aliases: ['dice', 'die', 'roll'], emoji: '🎲', mode: 'race',
-        title: 'Dice', points: GAME_POINTS.dice,
-        how: '!game dice → guess 1-6',
-        blurb: 'One die is rolled; the first exact guess takes 6 pts.'
-    },
-    {
         name: 'coin', aliases: ['coin', 'flip', 'toss', 'heads'], emoji: '🪙', mode: 'race',
         title: 'Coin toss', points: GAME_POINTS.coin,
         how: '!game coin → say heads or tails',
         blurb: 'A pre-flipped coin. Call it right for 2 pts.'
     },
     {
-        name: 'slots', aliases: ['slots', 'slot', 'machine'], emoji: '🎰', mode: 'payout',
-        title: 'Slots', points: GAME_POINTS.slots,
-        how: '!game slots → !guess 7 (your lucky digit)',
-        blurb: 'Three reels, digits 1-9. Three of a kind pays 15, a pair pays 3.'
-    },
-    {
         name: 'math', aliases: ['math', 'maths', 'sum', 'calc'], emoji: '➗', mode: 'race',
         title: 'Maths', points: GAME_POINTS.math,
-        how: '!game math [hard] → send the answer',
-        blurb: 'Easy sums or multi-step hard problems. First correct answer takes 5-10 pts.'
+        how: '!game math [easy|hard] [linear|calc|mvc|arith] → send the answer',
+        blurb: 'Arithmetic plus linear algebra, calculus and multivariable calculus. 5 easy / 10 hard.'
+    },
+    {
+        name: 'code', aliases: ['code', 'programming', 'prog', 'coding', 'cs', 'coal', 'asm'], emoji: '💻', mode: 'race',
+        title: 'Programming', points: GAME_POINTS.code,
+        how: '!game code [easy|hard] [pf|oop|ds|coal] → send the answer',
+        blurb: 'PF, OOP, data structures and COAL assembly/registers. 5 easy / 10 hard.'
     },
     {
         name: 'scramble', aliases: ['scramble', 'word', 'unscramble', 'anagram'], emoji: '🔤', mode: 'race',
@@ -266,6 +263,42 @@ export function answerMatches(text, accepted = []) {
         if (t === a) return true;
         if (a.length <= 3 || /^\d+$/.test(a)) continue;
         if (words <= 8 && new RegExp(`(^|\\s)${escapeRe(a)}(\\s|$)`).test(t)) return true;
+    }
+    return false;
+}
+
+/** "1/2" → 0.5, "-3" → -3, "0.25" → 0.25; anything else null. */
+function numericValue(s) {
+    const t = String(s ?? '').trim().replace(/\s+/g, '').replace(/−/g, '-');
+    let m = t.match(/^(-?\d+(?:\.\d+)?)$/);
+    if (m) return Number(m[1]);
+    m = t.match(/^(-?\d+)\/(\d+)$/);
+    if (m && Number(m[2]) !== 0) return Number(m[1]) / Number(m[2]);
+    return null;
+}
+
+/**
+ * Matching for maths/programming answers, where symbols matter: "O(n log n)"
+ * equals "O(nlogn)", "1/2" equals "0.5", but "-3" never equals "3".
+ */
+export function looseMatches(text, accepted = []) {
+    const raw = String(text ?? '').trim();
+    if (!raw) return false;
+    const spaced = (v) => String(v).toLowerCase().replace(/\s+/g, '').replace(/−/g, '-').replace(/[×]/g, 'x').replace(/²/g, '^2');
+    const bare = (v) => spaced(v).replace(/\^/g, '').replace(/[^\p{L}\p{N}]+/gu, '');
+    const t = spaced(raw);
+    const tn = numericValue(raw);
+    for (const a of accepted) {
+        const an = numericValue(a);
+        if (an !== null) {
+            if (tn !== null && Math.abs(tn - an) < 1e-9) return true;
+            if (t === spaced(a)) return true;
+            continue;                      // never fuzzy-match a number
+        }
+        if (t === spaced(a)) return true;
+        const b = bare(a);
+        if (b && bare(raw) === b) return true;
+        if (answerMatches(raw, [a])) return true;
     }
     return false;
 }
@@ -366,10 +399,9 @@ export function makeMath(level = 'easy', random = Math.random) {
 // ─── Engine ──────────────────────────────────────────────────────────────────
 const REVEAL = {
     number  : (r) => `the number was *${r.answer}*`,
-    dice    : (r) => `the die was *${r.answer}*`,
     coin    : (r) => `the coin was *${r.answer}*`,
-    slots   : (r) => `the reels were *${r.reels.join(' ')}*`,
-    math    : (r) => `the answer was *${r.answer}*`,
+    math    : (r) => `the answer was *${r.accepted ? r.accepted[0] : r.answer}*`,
+    code    : (r) => `the answer was *${r.accepted[0]}*`,
     scramble: (r) => `the word was *${r.answer}*`,
     trivia  : (r) => `the answer was *${r.accepted[0]}*`
 };
@@ -489,8 +521,9 @@ export function createGameEngine({
             '!game end        starter: end this chat’s round',
             '!game status     games on/off + rotating question counts',
             `!game addq Q ; A  contribute a trivia question (+${CONTRIBUTION_POINTS} pts)`,
+            '!game mode easy|hard  math + code level for this chat',
             '```',
-            '_Owner: !game on · !game stop (all chats) · !game reset tops (all boards)_',
+            '_Owner: !game on · !game stop (all chats) · !game reset tops (all boards) · !game reset @member [all]_',
             `Quick random: !random [n|1-100|a, b, c] · !roll 2d6 · !flip · !pick a, b · !shuffle a, b · !8ball <question>`
         );
         return lines.join('\n');
@@ -597,15 +630,6 @@ export function createGameEngine({
                 };
             }
 
-            case 'dice': {
-                round.answer = randomInt(1, 6, random);
-                return {
-                    round,
-                    text: `${game.emoji} *Dice* — I rolled one. Guess the face: 1 to 6.\n`
-                        + `First exact guess takes ${game.points} pts.` + tail
-                };
-            }
-
             case 'coin': {
                 round.answer = random() < 0.5 ? 'Heads' : 'Tails';
                 return {
@@ -615,18 +639,22 @@ export function createGameEngine({
                 };
             }
 
-            case 'slots': {
-                round.reels = slotReels({ count: 3, sides: 9 }, random);
-                return {
-                    round,
-                    text: `${game.emoji} *Slots* — three reels, each 1-9.\n`
-                        + 'Pick your lucky digit with `!guess 7` (one pick each).\n'
-                        + `Three of a kind = ${GAME_POINTS.slots} pts · a pair = 3 pts.` + tail
-                };
-            }
-
             case 'math': {
-                const level = /hard|difficult|2|two/i.test(args.join(' ')) ? 'hard' : 'easy';
+                const level = levelFrom(ctx.jid, args);
+                const topic = parseTopic(args, 'math');
+                const concept = topic === 'arithmetic' ? null
+                    : (topic || random() < 0.6) ? pickConcept('math', level, topic, ctx.jid) : null;
+                const points = level === 'hard' ? 10 : GAME_POINTS.math;
+                if (concept) {
+                    round.pool = concept;
+                    round.accepted = concept.a;
+                    round.problem = { question: concept.q, level, points, concept: true };
+                    return {
+                        round,
+                        text: `${game.emoji} *Maths* (${level} · ${TOPIC_LABEL[concept.topic] || concept.topic}) — first correct answer wins ${points} pts.\n\n`
+                            + `❓ *${concept.q}*` + tail
+                    };
+                }
                 const problem = makeMath(level, random);
                 round.answer = problem.answer;
                 round.problem = problem;
@@ -634,6 +662,22 @@ export function createGameEngine({
                     round,
                     text: `${game.emoji} *Maths* (${problem.level}) — first correct answer wins ${problem.points} pts.\n\n`
                         + `*${problem.question} = ?*` + tail
+                };
+            }
+
+            case 'code': {
+                const level = levelFrom(ctx.jid, args);
+                const topic = parseTopic(args, 'code');
+                const entry = pickConcept('code', level, topic, ctx.jid);
+                if (!entry) return { error: 'No programming questions for that topic yet.' };
+                const points = level === 'hard' ? 10 : GAME_POINTS.code;
+                round.pool = entry;
+                round.accepted = entry.a;
+                round.problem = { question: entry.q, level, points, concept: true };
+                return {
+                    round,
+                    text: `${game.emoji} *Programming* (${level} · ${TOPIC_LABEL[entry.topic] || entry.topic}) — first correct answer wins ${points} pts.\n\n`
+                        + `❓ *${entry.q}*` + tail
                 };
             }
 
@@ -683,6 +727,10 @@ export function createGameEngine({
         }
     }
 
+    const TOPIC_LABEL = {
+        linear: 'linear algebra', calculus: 'calculus', mvc: 'multivariable calculus',
+        pf: 'programming fundamentals', oop: 'OOP', ds: 'data structures', coal: 'COAL / assembly'
+    };
     const lastQuestion = new Map();
     const lastScramble = new Map();
 
@@ -695,13 +743,44 @@ export function createGameEngine({
     /** Built-ins and member submissions persist; AI content rotates independently. */
     function pickQuestion(jid) {
         const contributed = (scores?.questions?.() || []).map((e) => ({ q: e.q, a: e.a, by: e.by }));
-        const pool = [...TRIVIA, ...contributed, ...(content?.questions?.() || [])];
-        return pickDifferent(pool, lastQuestion.get(jid), 'q');
+        const ai = content?.questions?.() || [];
+        const pool = [...TRIVIA, ...contributed, ...ai];
+        const picked = pickDifferent(pool, lastQuestion.get(jid), 'q');
+        if (picked && ai.includes(picked)) content?.markUsed?.('trivia', picked);
+        return picked;
     }
 
     function pickPuzzle(jid) {
-        const pool = [...BUILTIN_PUZZLES, ...(content?.puzzles?.() || [])];
-        return pickDifferent(pool, lastScramble.get(jid), 'word') || { word: 'garden', clue: '' };
+        const ai = content?.puzzles?.() || [];
+        const pool = [...BUILTIN_PUZZLES, ...ai];
+        const picked = pickDifferent(pool, lastScramble.get(jid), 'word') || { word: 'garden', clue: '' };
+        if (ai.includes(picked)) content?.markUsed?.('scramble', picked);
+        return picked;
+    }
+
+    const lastConcept = new Map();   // "jid|kind" → last question text
+
+    /** Built-in bank + AI pool for math/code, filtered by level and topic. */
+    function pickConcept(kind, level, topic, jid) {
+        const bank = kind === 'math' ? MATH_BANK : CODE_BANK;
+        const ai = content?.items?.(kind) || [];
+        const fits = (e) => e.level === level && (!topic || e.topic === topic);
+        let pool = [...bank.filter(fits), ...ai.filter(fits)];
+        if (!pool.length) pool = [...bank, ...ai].filter((e) => !topic || e.topic === topic);
+        if (!pool.length) return null;
+        const stamp = `${jid}|${kind}`;
+        const picked = pickDifferent(pool, lastConcept.get(stamp), 'q');
+        lastConcept.set(stamp, picked.q);
+        if (ai.includes(picked)) content?.markUsed?.(kind, picked);
+        return picked;
+    }
+
+    /** "hard"/"easy" typed in the command wins; otherwise the chat's mode. */
+    function levelFrom(jid, args) {
+        const text = (args || []).join(' ');
+        if (/\b(hard|difficult)\b/i.test(text)) return 'hard';
+        if (/\b(easy|simple)\b/i.test(text)) return 'easy';
+        return scores?.modeOf?.(jid) || 'easy';
     }
 
     // ── attempts ─────────────────────────────────────────────────────────────
@@ -719,10 +798,11 @@ export function createGameEngine({
             }
             case 'scramble': return `💡 It starts with *${String(round.answer)[0].toUpperCase()}*`;
             case 'trivia':   return `💡 The answer starts with *${String(round.accepted[0])[0].toUpperCase()}*`;
-            case 'dice':     return round.answer > 3 ? '💡 It is 4, 5 or 6' : '💡 It is 1, 2 or 3';
             case 'coin':     return '💡 It begins with H or T, of course';
-            case 'math':     return `💡 The answer is ${round.answer % 2 === 0 ? 'even' : 'odd'}`;
-            case 'slots':    return '💡 A digit with a friend on the reels: ask the ones who played';
+            case 'math':     return round.accepted
+                ? `💡 The answer starts with *${String(round.accepted[0])[0].toUpperCase()}*`
+                : `💡 The answer is ${round.answer % 2 === 0 ? 'even' : 'odd'}`;
+            case 'code':     return `💡 The answer starts with *${String(round.accepted[0])[0].toUpperCase()}* (${String(round.accepted[0]).length} chars)`;
             default:         return '';
         }
     }
@@ -753,14 +833,11 @@ export function createGameEngine({
         const entry = playerEntry(round, key, label, idsOf(ctx));
         rememberIds(ctx, key);
 
-        const perPlayer = round.name === 'slots' ? 1 : maxAttempts;
-        if (entry.guesses >= perPlayer) {
+        if (entry.guesses >= maxAttempts) {
             return {
                 handled: true,
                 react: '🚫',
-                reply: round.name === 'slots'
-                    ? '🎰 One pick each — wait for the reels to stop.'
-                    : `🚫 You have used your ${perPlayer} guesses here — let someone else try!`
+                reply: `🚫 You have used your ${maxAttempts} guesses here — let someone else try!`
             };
         }
 
@@ -799,25 +876,6 @@ export function createGameEngine({
         // ── scored ───────────────────────────────────────────────────────────
         const won = verdict.points;
 
-        if (verdict.kind === 'payout') {
-            // Slots pays per player and keeps the round open for the others.
-            entry.earned += won;
-            if (won > 0) scores?.award(round.chat, whoOf(ctx, label), won);
-            touchParticipation(round, entry, ctx, label);
-            log?.debug?.(`game: ${label} scored ${won} on ${round.name} in ${round.chat}`);
-
-            const full = whichPlays(round) >= 8;
-            if (verdict.jackpot || full) {
-                const summary = endRound(round.chat, { winnerKey: key, head: verdict.jackpot ? '' : undefined, reason: 'full' });
-                return {
-                    handled: true,
-                    react: verdict.jackpot ? '🎉' : '✅',
-                    reply: [verdict.reply, summary].filter(Boolean).join('\n\n')
-                };
-            }
-            return { handled: true, react: won > 0 ? '✅' : '❌', reply: verdict.reply };
-        }
-
         // a win: score it, apply the streak bonus, then close the round.
         // The first attempt of a round counts as playing whether it wins or not.
         touchParticipation(round, entry, ctx, label);
@@ -833,11 +891,10 @@ export function createGameEngine({
         return { handled: true, react: '🎉', reply: summary ? `${reply}\n\n${summary}` : reply };
     }
 
-    const whichPlays = (round) => [...round.players.values()].reduce((n, p) => n + p.guesses, 0);
-
+    
     /**
      * The per-game rules: does this text answer the round, and what happens?
-     * @returns {{kind:'win'|'payout'|'wrong'|'repeat'|'ignore', points?:number, reply?:string, reason?:string, value?:any}}
+     * @returns {{kind:'win'|'wrong'|'repeat'|'ignore', points?:number, reply?:string, reason?:string, value?:any}}
      */
     function score(round, entry, text, explicit) {
         const raw = String(text ?? '').trim();
@@ -862,17 +919,6 @@ export function createGameEngine({
                 return { kind: 'wrong', reply: `${dir} · ${hotCold(n, round.answer, round.min, round.max)}` };
             }
 
-            case 'dice': {
-                const n = parseNumberAnswer(raw);
-                if (n === null || n < 1 || n > 6) {
-                    return explicit ? { kind: 'ignore', reason: 'Guess a die face: 1 to 6.' } : { kind: 'ignore' };
-                }
-                if (entry.tried.has(n)) return { kind: 'repeat', value: n };
-                entry.tried.add(n);
-                if (n === round.answer) return { kind: 'win', points: GAME_POINTS.dice };
-                return { kind: 'wrong', reply: `📉 Mine is ${n < round.answer ? 'higher' : 'lower'} than ${n}` };
-            }
-
             case 'coin': {
                 const call = parseCoinCall(raw);
                 if (call === null) {
@@ -894,20 +940,20 @@ export function createGameEngine({
                 return { kind: 'wrong' };
             }
 
-            case 'slots': {
-                const digit = parseNumberAnswer(raw);
-                if (digit === null || digit < 1 || digit > 9) {
-                    return explicit ? { kind: 'ignore', reason: 'Pick a lucky digit: 1 to 9.' } : { kind: 'ignore' };
-                }
-                const matches = round.reels.filter((r) => r === digit).length;
-                const won = matches === 3 ? GAME_POINTS.slots : matches === 2 ? 3 : 0;
-                const reply = matches === 0
-                    ? undefined
-                    : `${round.emoji} ${'*' + digit + '* → '}${matches === 3 ? 'THREE of a kind! 🎉' : 'two on the reels ✨'}`;
-                return { kind: 'payout', points: won, reply, jackpot: matches === 3 };
-            }
-
+            case 'code':
             case 'math': {
+                if (round.accepted) {
+                    // concept question: symbols matter, so use the loose matcher
+                    const norm = raw.toLowerCase().replace(/\s+/g, ' ');
+                    if (looseMatches(raw, round.accepted)) {
+                        if (entry.tried.has(norm)) return { kind: 'repeat', value: raw };
+                        return { kind: 'win', points: round.problem.points };
+                    }
+                    if (!explicit) return { kind: 'ignore' };
+                    if (entry.tried.has(norm)) return { kind: 'repeat', value: raw };
+                    entry.tried.add(norm);
+                    return { kind: 'wrong', reply: `❌ ${raw} is not it` };
+                }
                 const n = parseNumberAnswer(raw);
                 if (n === null) {
                     return explicit ? { kind: 'ignore', reason: `Send the answer to ${round.problem.question}` } : { kind: 'ignore' };
@@ -971,12 +1017,10 @@ export function createGameEngine({
 
         const played = rows.filter((p) => p.earned > 0);
         const reveal = REVEAL[round.name] ? REVEAL[round.name](round) : '';
-        // A payout game (slots) can end with several members having scored, so
-        // "no winner" would be wrong there — it just reports the reels.
         const title = head !== undefined
             ? head
             : (reveal
-                ? `⏰ ${round.mode === 'payout' ? 'Round over' : 'No winner this time'} — ${reveal}.`
+                ? `⏰ No winner this time — ${reveal}.`
                 : '⏰ Time is up.');
 
         const lines = [
@@ -1052,16 +1096,66 @@ export function createGameEngine({
         return cancelled.length;
     }
 
-    function statusText() {
+    function statusText(ctx) {
+        const st = content?.status?.();
+        const line = st
+            ? Object.entries(st).map(([c, v]) => `${c} ${v.count}${v.used ? ` (${v.used} played)` : ''}`).join(' · ')
+            : `trivia ${content?.questionCount || 0} · scramble ${content?.puzzleCount || 0}`;
+        const hours = st ? `\n_trivia/scramble renew every ${st.trivia.everyHours}h if played · math/code replace played questions every ${st.math.everyHours}h_` : '';
         return `🎮 Games: *${enabled ? 'ON' : 'OFF'}* · ${rounds.size} active round(s) · ${cooldownMs / 1000}s between rounds\n`
-            + `🧠 Daily AI pool: ${content?.questionCount || 0} trivia · ${content?.puzzleCount || 0} puzzles`
-            + (content?.generatedAt ? ` (updated ${content.generatedAt.slice(0, 10)})` : ' (using built-ins until ready)');
+            + `🎚️ Math/code mode here: *${scores?.modeOf?.(ctx?.jid) || 'easy'}*\n`
+            + `🧠 AI pool: ${line}${hours}`;
+    }
+
+    /** Owner: !game reset @member [all] — one member, this chat or every chat. */
+    async function resetMember(ctx, args) {
+        const everywhere = args.some((a) => /^(all|global|everywhere)$/i.test(a));
+        const typed = args.map((a) => a.replace(/\D/g, '')).filter((d) => d.length >= 6);
+        const raws = ctx.mentioned?.length ? ctx.mentioned
+            : typed.length ? typed
+                : ctx.quotedParticipant ? [ctx.quotedParticipant] : [];
+        if (!raws.length) {
+            return { handled: true, react: '⚠️', reply: 'Usage: `!game reset @member` (this chat) · `!game reset @member all` (every chat) · `!game reset tops` (everyone)' };
+        }
+        const lines = [];
+        let any = false;
+        for (const raw of raws) {
+            const ids = new Set(ctx.expandIds?.(raw) || []);
+            ids.add(normalizeId(raw));
+            ids.delete('');
+            let label = '';
+            for (const id of ids) { label = label || await ctx.groups?.nameOf?.(ctx.jid, id) || ''; }
+            const out = scores.resetPlayer(ctx.jid, ids, { everywhere });
+            const name = out.name || label || String(raw).replace(/@.*/, '');
+            if (!out.found) { lines.push(`ℹ️ ${name} has no points${everywhere ? ' anywhere' : ' in this chat'}.`); continue; }
+            any = true;
+            for (const round of rounds.values()) {
+                for (const [k, p] of round.players) if (p.ids.some((i) => ids.has(i))) round.players.delete(k);
+            }
+            lines.push(`🧹 ${name}: ${out.points} pts cleared${everywhere ? ` in ${out.found} chat(s)` : ''}.`
+                + (out.saved ? '' : ' ⚠️ Could not save to disk.'));
+        }
+        log?.info?.(`game: member reset by ${ctx.senderLabel}: ${lines.join(' ')}`);
+        return { handled: true, react: any ? '✅' : 'ℹ️', reply: lines.join('\n') };
     }
 
     async function handle(ctx, args = []) {
         const sub = String(args[0] || '').toLowerCase();
 
-        if (sub === 'status') return { handled: true, reply: statusText() };
+        if (sub === 'status') return { handled: true, reply: statusText(ctx) };
+        if (sub === 'mode' || sub === 'level' || sub === 'difficulty') {
+            const want = String(args[1] || '').toLowerCase();
+            if (!['easy', 'hard'].includes(want)) {
+                return { handled: true, reply: `🎚️ Math/code mode here is *${scores?.modeOf?.(ctx.jid) || 'easy'}*. Change it: \`!game mode easy\` or \`!game mode hard\`` };
+            }
+            const saved = scores?.setMode?.(ctx.jid, want);
+            return {
+                handled: true, react: want === 'hard' ? '🔥' : '🌱',
+                reply: `🎚️ Math and code rounds in this chat are now *${want}* (${want === 'hard' ? 10 : 5} pts). `
+                    + 'You can still override one round: `!game math easy`, `!game code hard`.'
+                    + (saved === false ? '\n⚠️ Could not save this setting.' : '')
+            };
+        }
         if (sub === 'on') {
             if (!ctx.isOwner) return ownerOnly();
             enabled = true;
@@ -1090,8 +1184,10 @@ export function createGameEngine({
         }
         if (sub === 'reset') {
             if (!ctx.isOwner) return ownerOnly();
-            if (!['tops', 'top', 'scores'].includes(String(args[1] || '').toLowerCase()) || args.length !== 2) {
-                return { handled: true, react: '⚠️', reply: 'Usage: `!game reset tops` (clears all leaderboards).' };
+            const what = String(args[1] || '').toLowerCase();
+            if (!['tops', 'top', 'scores'].includes(what) || args.length !== 2) {
+                if (!scores?.resetPlayer) return { handled: true, react: '⚠️', reply: 'The leaderboard is not available.' };
+                return resetMember(ctx, args.slice(1));
             }
             if (!scores?.resetBoards) return { handled: true, react: '⚠️', reply: 'The leaderboard is not available.' };
             const count = cancelAll(ctx.jid, 'Leaderboards reset');
@@ -1274,11 +1370,15 @@ export function createGameEngine({
 
         switch (round.name) {
             case 'number':
-            case 'math':
-            case 'slots':
                 return /^-?\d+$/.test(text) ? takeAttempt(ctx, text, false) : { handled: false };
-            case 'dice':
-                return /^[1-6]$/.test(text) ? takeAttempt(ctx, text, false) : { handled: false };
+            case 'math':
+            case 'code':
+                if (round.accepted) {
+                    // like trivia: only a correct answer interrupts the chat
+                    return text.length <= 60 && looseMatches(text, round.accepted)
+                        ? takeAttempt(ctx, text, false) : { handled: false };
+                }
+                return /^-?\d+$/.test(text) ? takeAttempt(ctx, text, false) : { handled: false };
             case 'coin':
                 return parseCoinCall(text) !== null ? takeAttempt(ctx, text, false) : { handled: false };
             case 'scramble':

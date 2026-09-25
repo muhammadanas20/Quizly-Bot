@@ -558,10 +558,10 @@ test('router: owner global stop/reset via WhatsApp, member cannot operate them',
 
 test('router: !game on works even if GAMES=off at startup', async () => {
     const { router, games, texts } = world({ env: { GAMES: 'off' } });
-    await router.processMessage(msg({ message: { conversation: '!game dice' } }));
+    await router.processMessage(msg({ message: { conversation: '!game coin' } }));
     assert.match(texts().at(-1), /Games are OFF/);
     await router.processMessage(ownCmd('!game on'));
     assert.equal(games.enabled, true);
-    await router.processMessage(msg({ message: { conversation: '!game dice' } }));
-    assert.equal(games.active(GROUP).name, 'dice');
+    await router.processMessage(msg({ message: { conversation: '!game coin' } }));
+    assert.equal(games.active(GROUP).name, 'coin');
 });

@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 
 import {
     randomInt, pickOne, shuffle, parseRange, parseDice, rollDice,
-    flipCoin, parseCoinCall, slotReels, eightBall, parseOptions,
+    flipCoin, parseCoinCall, eightBall, parseOptions,
     createRandomTools, EIGHT_BALL
 } from '../src/random.js';
 
@@ -91,10 +91,6 @@ test('rollDice reports every roll and the total', () => {
 test('flipCoin is a coin, not a shortcut', () => {
     assert.equal(flipCoin(fixed(0.1)), 'Heads');
     assert.equal(flipCoin(fixed(0.9)), 'Tails');
-});
-
-test('slotReels returns one digit per reel inside the sides', () => {
-    assert.deepEqual(slotReels({ count: 3, sides: 9 }, seq([0, 0.5, 0.999])), [1, 5, 9]);
 });
 
 test('eightBall always answers from its own list', () => {

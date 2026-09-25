@@ -221,7 +221,8 @@ export async function startBot({
                     log.raw('     (pair again) makes WhatsApp send the media too.');
                 }
                 log.raw(`  🎮  games    : ${games.enabled ? 'ON' : 'OFF'} (${config.gameTimeoutMs / 1000}s rounds, ${config.gameCooldownMs / 1000}s between, ${scores.playerCount} players)`);
-                log.raw(`  📚  daily AI : ${content.questionCount} trivia · ${content.puzzleCount} puzzles`);
+                const pools = content.status();
+                log.raw(`  📚  AI pools : ${Object.entries(pools).map(([c, v]) => `${c} ${v.count}`).join(' · ')}`);
                 log.raw(`  🧠  ai       : ${config.aiOrder.filter((p) => config[p]?.key).join(' → ')}`);
                 log.raw(`  💾  memory   : ${mem} MB RSS`);
                 log.raw('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
