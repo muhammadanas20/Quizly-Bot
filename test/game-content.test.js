@@ -224,6 +224,56 @@ test('pause/close abort the in-flight batch; single-flight', async (t) => {
     assert.equal(fs.existsSync(file), false);
 });
 
+test('owner can remove AI items from a pool and the removal persists', async (t) => {
+    const file = disk(t);
+    const calls = [];
+    const store = createGameContentStore({ file, config, now: () => Date.UTC(2026, 8, 25), generate: fakeGenerate(calls), gapMs: 0 }).load();
+    await store.refreshIfStale();
+    assert.equal(store.questions().length, 2);
+
+    const [first] = store.questions();
+    assert.deepEqual(store.remove('trivia', (item) => item.q === first.q), [first]);
+    assert.equal(store.questions().length, 1);
+    assert.deepEqual(store.remove('trivia', () => false), [], 'nothing matching removes nothing');
+    assert.equal(store.remove('trivia', () => true).length, 1);
+    assert.equal(store.questions().length, 0);
+    assert.deepEqual(
+        createGameContentStore({ file, config }).load().questions(),
+        [],
+        'the removal survives a restart'
+    );
+    assert.throws(() => store.remove('nope', () => true), /unknown module/);
+    store.close();
+});
+
+test('owner can update AI answers and the fix persists', async (t) => {
+    const file = disk(t);
+    const calls = [];
+    const store = createGameContentStore({ file, config, now: () => Date.UTC(2026, 8, 25), generate: fakeGenerate(calls), gapMs: 0 }).load();
+    await store.refreshIfStale();
+    const [first, second] = store.questions();
+
+    const updated = store.updateAnswers('trivia', (item) => item.q === first.q, ['fixed']);
+    assert.equal(updated.length, 1);
+    assert.deepEqual(updated[0].a, ['fixed']);
+    assert.equal(updated[0].q, first.q, 'the question itself is untouched');
+    assert.deepEqual(store.questions()[1].a, second.a, 'other items are untouched');
+
+    // The engine matches by identity — the replaced objects must still be returned.
+    const hit = store.questions()[1];
+    const again = store.updateAnswers('trivia', (item) => item === hit, ['fixed2']);
+    assert.equal(again.length, 1);
+    assert.deepEqual(store.questions()[1].a, ['fixed2']);
+    assert.deepEqual(store.updateAnswers('trivia', () => false, ['x']), []);
+    assert.deepEqual(
+        createGameContentStore({ file, config }).load().questions()[0].a,
+        ['fixed'],
+        'the fix survives a restart'
+    );
+    assert.throws(() => store.updateAnswers('nope', () => true, ['x']), /unknown module/);
+    store.close();
+});
+
 test('v1 files migrate; corrupt/oversized files fall back to built-ins', (t) => {
     const file = disk(t);
     fs.writeFileSync(file, JSON.stringify({

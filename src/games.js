@@ -15,6 +15,10 @@
  *   !game top [all]            leaderboard — this chat, or everywhere
  *   !game me                   your own score card
  *   !game addq Q ; A           owner: contribute a trivia question to the pool
+ *   !game delete <Q|#>         owner: delete a trivia question (added, AI or built-in)
+ *   !game modify <Q|#> ; A     owner: change a trivia answer (added, AI or built-in)
+ *   !game listq [search]       owner: list added trivia / search every pool
+ *   !game restore              owner: bring back hidden built-ins, clear modified answers
  *
  * Seven games: number, coin, math, code, scramble, trivia, lucky.
  * Everyone plays, everyone scores (every attempt earns a participation point),
@@ -32,6 +36,7 @@
 import { randomInt, pickOne, shuffle, parseRange, parseCoinCall } from './random.js';
 import { MATH_BANK, CODE_BANK, parseTopic } from './banks.js';
 import { normalizeId } from './config.js';
+import { questionKey } from './scores.js';
 
 // ─── Words for !game scramble ────────────────────────────────────────────────
 export const WORDS = Object.freeze([
@@ -230,6 +235,11 @@ export function findGame(nameOrAlias) {
 
 const points = (n) => `*+${n}* ${n === 1 ? 'pt' : 'pts'}`;
 const pt = (n) => `${n} ${n === 1 ? 'pt' : 'pts'}`;
+/** Shorten a question for chat-sized replies. */
+const short = (s, n = 90) => {
+    const t = String(s || '');
+    return t.length > n ? `${t.slice(0, n - 1)}…` : t;
+};
 
 // ─── Pure helpers ────────────────────────────────────────────────────────────
 /** Lowercase, accent- and punctuation-free form used for answer matching. */
@@ -522,7 +532,7 @@ export function createGameEngine({
             '!game status     games on/off + rotating question counts',
             '!game mode easy|hard  math + code level for this chat',
             '```',
-            `_Owner: !game on · !game stop (all chats) · !game reset tops (all boards) · !game reset @member [all] · !game addq Q ; A (+${CONTRIBUTION_POINTS} pts)_`,
+            `_Owner: !game on · !game stop (all chats) · !game reset tops (all boards) · !game reset @member [all] · !game addq Q ; A (+${CONTRIBUTION_POINTS} pts) · !game delete Q · !game modify Q ; A · !game listq_`,
             `Quick random: !random [n|1-100|a, b, c] · !roll 2d6 · !flip · !pick a, b · !shuffle a, b · !8ball <question>`
         );
         return lines.join('\n');
@@ -743,7 +753,14 @@ export function createGameEngine({
     function pickQuestion(jid) {
         const contributed = (scores?.questions?.() || []).map((e) => ({ q: e.q, a: e.a, by: e.by }));
         const ai = content?.questions?.() || [];
-        const pool = [...TRIVIA, ...contributed, ...ai];
+        // Built-ins the owner deleted stay deleted until !game restore, and
+        // answers the owner modified are applied on top of the shipped ones.
+        const builtin = (scores?.isBuiltinHidden ? TRIVIA.filter((e) => !scores.isBuiltinHidden(e.q)) : TRIVIA)
+            .map((e) => {
+                const override = scores?.builtinAnswer?.(e.q);
+                return override ? { ...e, a: override } : e;
+            });
+        const pool = [...builtin, ...contributed, ...ai];
         const picked = pickDifferent(pool, lastQuestion.get(jid), 'q');
         if (picked && ai.includes(picked)) content?.markUsed?.('trivia', picked);
         return picked;
@@ -1233,8 +1250,23 @@ export function createGameEngine({
         // owner-only, and the owner check inside addQuestion has to answer
         // before "games are off" can — otherwise a member is told to wait for
         // the owner to reopen games, as if that would let them contribute.
+        // delete/modify/listq/restore are the same family: owner-only curation
+        // that answers ⛔ before the switch, and works while games are off so
+        // the pool can be cleaned before reopening.
         if (sub === 'addq' || sub === 'add' || sub === 'contribute') {
             return addQuestion(ctx, args.slice(1));
+        }
+        if (sub === 'delete' || sub === 'del' || sub === 'delq' || sub === 'deleteq' || sub === 'removeq' || sub === 'remove') {
+            return deleteQuestion(ctx, args.slice(1));
+        }
+        if (sub === 'modify' || sub === 'mod' || sub === 'edit' || sub === 'update') {
+            return modifyQuestion(ctx, args.slice(1));
+        }
+        if (sub === 'listq' || sub === 'listquestions' || sub === 'questions') {
+            return listQuestions(ctx, args.slice(1));
+        }
+        if (sub === 'restore' || sub === 'undelete') {
+            return restoreHidden(ctx);
         }
         if (!enabled) return gamesOff();
         if (sub === 'stop' || sub === 'end' || sub === 'quit' || sub === 'cancel') {
@@ -1477,6 +1509,408 @@ export function createGameEngine({
         return String(ctx.msg?.pushName || '').trim()
             || String(ctx.senderLabel || '').replace(/@.*/, '')
             || 'member';
+    }
+
+    // ── deleting + listing trivia ────────────────────────────────────────────
+    /** One line describing what the trivia pool currently holds. */
+    function poolSummary() {
+        const added = scores?.questionCount || 0;
+        const ai = content?.questions?.().length || 0;
+        const hidden = scores?.hiddenTriviaCount || 0;
+        return `${added} added · ${ai} AI · ${TRIVIA.length - hidden} built-in${hidden ? ` (${hidden} hidden)` : ''}`;
+    }
+
+    /**
+     * `!game delete <question or number>` — the counterpart of `!game addq`,
+     * owner-only.
+     *
+     * A plain number removes that added question (`!game listq` shows the
+     * numbers); any other text searches every trivia pool — added, AI and
+     * built-in. An exact match is removed wherever it lives (a built-in is
+     * hidden persistently, since it ships with the code); a lone partial match
+     * goes too, while several partial matches are listed so the owner can be
+     * more specific instead of deleting the wrong question.
+     */
+    function deleteQuestion(ctx, args) {
+        if (!ctx.isOwner) return ownerOnly();
+        if (!scores) return { handled: true, react: '⚠️', reply: '⚠️ The question pool is not available.' };
+        const raw = args.join(' ').trim();
+        if (!raw) {
+            return {
+                handled: true,
+                react: '⚠️',
+                reply: '⚠️ Usage: `!game delete <question or number>`\n'
+                    + 'Example: `!game delete Which city is the capital of Japan?`\n'
+                    + '_Added questions are numbered — see them with `!game listq`, then `!game delete 3` removes #3._'
+            };
+        }
+        // Forgiving of the addq shape: `!game delete Q ; A` still means Q.
+        const query = raw.split(';')[0].trim() || raw;
+
+        // ── by number: added questions only ──
+        const numbered = query.match(/^#?(\d+)$/);
+        if (numbered) {
+            const result = scores.removeQuestionAt?.(Number(numbered[1]) - 1);
+            if (!result) return { handled: true, react: '⚠️', reply: '⚠️ The question pool is not available.' };
+            if (!result.ok) {
+                const have = scores.questionCount || 0;
+                return {
+                    handled: true,
+                    react: '⚠️',
+                    reply: `⚠️ I could not delete that: ${result.error}.`
+                        + (have ? ' See the numbers with `!game listq`.' : '')
+                };
+            }
+            return {
+                handled: true,
+                react: '🗑️',
+                reply: `🗑️ Deleted added question #${numbered[1]}: *${result.entry.q}*\n`
+                    + `_Answer was: ${result.entry.a.join(' / ')}_\n\n🧠 Pool: ${poolSummary()}`
+                    + (result.saved === false ? '\n⚠️ Could not save to disk; it may return after a restart.' : '')
+            };
+        }
+
+        // ── by text: search every pool ──
+        const needle = questionKey(query);
+        if (!needle) {
+            return { handled: true, react: '⚠️', reply: '⚠️ I could not delete that: the question is empty.' };
+        }
+        const added = scores.findQuestions?.(query) || [];
+        const aiItems = content?.questions?.() || [];
+        const aiHits = aiItems.filter((e) => questionKey(e.q).includes(needle));
+        const builtinHits = TRIVIA
+            .filter((e) => !scores.isBuiltinHidden?.(e.q))
+            .filter((e) => questionKey(e.q).includes(needle));
+
+        const exact = [];
+        for (const m of added) if (m.exact) exact.push({ pool: 'added', index: m.index, entry: m.entry });
+        for (const e of aiHits) if (questionKey(e.q) === needle) exact.push({ pool: 'AI', entry: e });
+        for (const e of builtinHits) if (questionKey(e.q) === needle) exact.push({ pool: 'built-in', entry: e });
+
+        const partial = [];
+        for (const m of added) if (!m.exact) partial.push({ tag: `added #${m.index + 1}`, pool: 'added', index: m.index, entry: m.entry });
+        for (const e of aiHits) if (questionKey(e.q) !== needle) partial.push({ tag: 'AI', pool: 'AI', entry: e });
+        for (const e of builtinHits) if (questionKey(e.q) !== needle) partial.push({ tag: 'built-in', pool: 'built-in', entry: e });
+
+        // One exact question, wherever it lives — or the only partial match.
+        const targets = exact.length ? exact : (partial.length === 1 ? [partial[0]] : []);
+        if (targets.length) {
+            const done = [];
+            let aiUnavailable = false;
+            let saveFailed = false;
+            // Descending, so the indexes stay valid while splicing.
+            for (const t of targets.filter((t) => t.pool === 'added').sort((a, b) => b.index - a.index)) {
+                const r = scores.removeQuestionAt(t.index);
+                if (r?.ok) {
+                    done.push(`added #${t.index + 1}`);
+                    if (r.saved === false) saveFailed = true;
+                }
+            }
+            const aiTargets = targets.filter((t) => t.pool === 'AI').map((t) => t.entry);
+            if (aiTargets.length) {
+                if (!content?.remove) {
+                    aiUnavailable = true;
+                } else {
+                    try {
+                        for (const gone of content.remove('trivia', (item) => aiTargets.includes(item))) {
+                            void gone;
+                            done.push('AI pool');
+                        }
+                    } catch {
+                        saveFailed = true;
+                    }
+                }
+            }
+            for (const t of targets.filter((t) => t.pool === 'built-in')) {
+                const r = scores.hideBuiltinTrivia?.(t.entry.q);
+                if (r?.ok) {
+                    done.push('built-in');
+                    if (r.saved === false) saveFailed = true;
+                }
+            }
+            if (!done.length) {
+                if (aiUnavailable && targets.every((t) => t.pool === 'AI')) {
+                    return { handled: true, react: '⚠️', reply: '⚠️ That question lives in the AI pool, which cannot be edited right now.' };
+                }
+                return { handled: true, react: '⚠️', reply: '⚠️ I could not delete that: nothing was removed.' };
+            }
+            const from = [...new Set(done)].join(', ');
+            return {
+                handled: true,
+                react: '🗑️',
+                reply: `🗑️ Deleted: *${targets[0].entry.q}*\n`
+                    + `_Removed from ${from}._\n\n🧠 Pool: ${poolSummary()}`
+                    + (aiUnavailable ? '\n⚠️ The AI copy could not be removed.' : '')
+                    + (saveFailed ? '\n⚠️ Could not save to disk; it may return after a restart.' : '')
+            };
+        }
+
+        if (!partial.length) {
+            const hiddenHits = TRIVIA.filter((e) => scores.isBuiltinHidden?.(e.q) && questionKey(e.q).includes(needle));
+            if (hiddenHits.length) {
+                return {
+                    handled: true,
+                    react: 'ℹ️',
+                    reply: `ℹ️ That question is already deleted: *${hiddenHits[0].q}*\n`
+                        + '_`!game restore` brings back hidden built-ins._'
+                };
+            }
+            return {
+                handled: true,
+                react: 'ℹ️',
+                reply: `ℹ️ No trivia question matches *${short(query, 60)}*.\n\n🧠 Pool: ${poolSummary()}`
+            };
+        }
+
+        const shown = partial.slice(0, 5).map((p) => `• [${p.tag}] ${short(p.entry.q)}`);
+        return {
+            handled: true,
+            react: '⚠️',
+            reply: `⚠️ ${partial.length} questions match *${short(query, 60)}* — be more specific:\n`
+                + shown.join('\n')
+                + (partial.length > 5 ? `\n_…and ${partial.length - 5} more._` : '')
+                + '\n_Copy the full question to delete exactly one._'
+        };
+    }
+
+    /**
+     * `!game modify <question or number> ; <new answer>` — fix a wrong trivia
+     * answer, owner-only.
+     *
+     * A plain number updates that added question (`!game listq` shows the
+     * numbers); any other text searches every pool like `!game delete` does.
+     * An exact match is updated wherever it lives — a built-in is overridden
+     * persistently, since it ships with the code. `/` adds another accepted
+     * spelling, and a `:` works as the separator too.
+     */
+    function modifyQuestion(ctx, args) {
+        if (!ctx.isOwner) return ownerOnly();
+        if (!scores) return { handled: true, react: '⚠️', reply: '⚠️ The question pool is not available.' };
+        const raw = args.join(' ').trim();
+        const split = raw.match(/^(.*?)\s*(?:;|\||->)\s*(.+)$/);
+        let left = '';
+        let right = '';
+        if (split) {
+            left = split[1].trim();
+            right = split[2].trim();
+        } else {
+            // No addq-style separator: fall back to the last colon, so colons
+            // inside the question itself survive.
+            const colon = raw.lastIndexOf(':');
+            if (colon > 0) {
+                left = raw.slice(0, colon).trim();
+                right = raw.slice(colon + 1).trim();
+            }
+        }
+        if (!left || !right) {
+            return {
+                handled: true,
+                react: '⚠️',
+                reply: '⚠️ Usage: `!game modify <question or number> ; <new answer>`\n'
+                    + 'Example: `!game modify Which planet has rings? ; Saturn`\n'
+                    + '_A `:` works too (`!game modify 3 : Saturn`), and `/` adds another accepted spelling._'
+            };
+        }
+        const answers = right.split('/').map((s) => s.trim()).filter(Boolean);
+        if (!answers.length) {
+            return { handled: true, react: '⚠️', reply: '⚠️ I could not modify that: the answer is missing.' };
+        }
+
+        // ── by number: added questions only ──
+        const numbered = left.match(/^#?(\d+)$/);
+        if (numbered) {
+            const result = scores.updateQuestionAt?.(Number(numbered[1]) - 1, answers);
+            if (!result) return { handled: true, react: '⚠️', reply: '⚠️ The question pool is not available.' };
+            if (!result.ok) {
+                return {
+                    handled: true,
+                    react: '⚠️',
+                    reply: `⚠️ I could not modify that: ${result.error}.`
+                        + (scores.questionCount ? ' See the numbers with `!game listq`.' : '')
+                };
+            }
+            return {
+                handled: true,
+                react: '✏️',
+                reply: `✏️ Updated added question #${numbered[1]}: *${result.entry.q}*\n`
+                    + `_Was: ${result.before.join(' / ')} → Now: ${result.entry.a.join(' / ')}_`
+                    + (result.saved === false ? '\n⚠️ Could not save to disk; it may revert after a restart.' : '')
+            };
+        }
+
+        // ── by text: search every pool ──
+        const needle = questionKey(left);
+        if (!needle) {
+            return { handled: true, react: '⚠️', reply: '⚠️ I could not modify that: the question is empty.' };
+        }
+        const added = scores.findQuestions?.(left) || [];
+        const aiItems = content?.questions?.() || [];
+        const aiHits = aiItems.filter((e) => questionKey(e.q).includes(needle));
+        const builtinHits = TRIVIA
+            .filter((e) => !scores.isBuiltinHidden?.(e.q))
+            .filter((e) => questionKey(e.q).includes(needle));
+
+        const exact = [];
+        for (const m of added) if (m.exact) exact.push({ pool: 'added', index: m.index, entry: m.entry });
+        for (const e of aiHits) if (questionKey(e.q) === needle) exact.push({ pool: 'AI', entry: e });
+        for (const e of builtinHits) if (questionKey(e.q) === needle) exact.push({ pool: 'built-in', entry: e });
+
+        const partial = [];
+        for (const m of added) if (!m.exact) partial.push({ tag: `added #${m.index + 1}`, pool: 'added', index: m.index, entry: m.entry });
+        for (const e of aiHits) if (questionKey(e.q) !== needle) partial.push({ tag: 'AI', pool: 'AI', entry: e });
+        for (const e of builtinHits) if (questionKey(e.q) !== needle) partial.push({ tag: 'built-in', pool: 'built-in', entry: e });
+
+        // One exact question, wherever it lives — or the only partial match.
+        const targets = exact.length ? exact : (partial.length === 1 ? [partial[0]] : []);
+        if (targets.length) {
+            const done = [];
+            let aiUnavailable = false;
+            let saveFailed = false;
+            for (const t of targets.filter((t) => t.pool === 'added')) {
+                const r = scores.updateQuestionAt(t.index, answers);
+                if (r?.ok) {
+                    done.push({ where: `added #${t.index + 1}`, old: r.before });
+                    if (r.saved === false) saveFailed = true;
+                }
+            }
+            const aiTargets = targets.filter((t) => t.pool === 'AI').map((t) => t.entry);
+            if (aiTargets.length) {
+                if (!content?.updateAnswers) {
+                    aiUnavailable = true;
+                } else {
+                    const olds = new Map(aiTargets.map((e) => [questionKey(e.q), [...e.a]]));
+                    try {
+                        const updated = content.updateAnswers('trivia', (item) => aiTargets.includes(item), answers);
+                        for (const u of updated) done.push({ where: 'AI pool', old: olds.get(questionKey(u.q)) || [] });
+                    } catch {
+                        saveFailed = true;
+                    }
+                }
+            }
+            for (const t of targets.filter((t) => t.pool === 'built-in')) {
+                const previous = scores.builtinAnswer?.(t.entry.q) || t.entry.a;
+                const r = scores.setBuiltinAnswer?.(t.entry.q, answers);
+                if (r?.ok) {
+                    done.push({ where: 'built-in', old: previous });
+                    if (r.saved === false) saveFailed = true;
+                }
+            }
+            if (!done.length) {
+                if (aiUnavailable && targets.every((t) => t.pool === 'AI')) {
+                    return { handled: true, react: '⚠️', reply: '⚠️ That question lives in the AI pool, which cannot be edited right now.' };
+                }
+                return { handled: true, react: '⚠️', reply: '⚠️ I could not modify that: nothing was updated.' };
+            }
+            const fresh = answers.join(' / ');
+            const lines = done.map((d) => `• ${d.where}: _${(d.old || []).join(' / ') || '?'} → ${fresh}_`);
+            return {
+                handled: true,
+                react: '✏️',
+                reply: `✏️ Updated: *${targets[0].entry.q}*\n${lines.join('\n')}`
+                    + (aiUnavailable ? '\n⚠️ The AI copy could not be updated.' : '')
+                    + (saveFailed ? '\n⚠️ Could not save to disk; it may revert after a restart.' : '')
+            };
+        }
+
+        if (!partial.length) {
+            const hiddenHits = TRIVIA.filter((e) => scores.isBuiltinHidden?.(e.q) && questionKey(e.q).includes(needle));
+            if (hiddenHits.length) {
+                return {
+                    handled: true,
+                    react: 'ℹ️',
+                    reply: 'ℹ️ That question is deleted — `!game restore` brings it back before it can be modified.'
+                };
+            }
+            return {
+                handled: true,
+                react: 'ℹ️',
+                reply: `ℹ️ No trivia question matches *${short(left, 60)}*.\n\n🧠 Pool: ${poolSummary()}`
+            };
+        }
+
+        const shown = partial.slice(0, 5).map((p) => `• [${p.tag}] ${short(p.entry.q)}`);
+        return {
+            handled: true,
+            react: '⚠️',
+            reply: `⚠️ ${partial.length} questions match *${short(left, 60)}* — be more specific:\n`
+                + shown.join('\n')
+                + (partial.length > 5 ? `\n_…and ${partial.length - 5} more._` : '')
+                + '\n_Copy the full question to modify exactly one._'
+        };
+    }
+
+    /**
+     * `!game listq [search]` — owner-only. Without a search it numbers the
+     * added questions (the numbers `!game delete` takes); with one it searches
+     * every pool. Answers are shown because the owner already sees them via
+     * `!game answer` — members get ⛔ so the game is never spoiled.
+     */
+    function listQuestions(ctx, args) {
+        if (!ctx.isOwner) return ownerOnly();
+        if (!scores) return { handled: true, react: '⚠️', reply: '⚠️ The question pool is not available.' };
+        const query = args.join(' ').trim();
+        const added = scores.questions?.() || [];
+
+        if (!query) {
+            const lines = added.slice(0, 20).map((e, i) => `${i + 1}. ${short(e.q)} — _${short(e.a.join(' / '), 40)}_`);
+            const head = added.length
+                ? `📋 *Added trivia (${added.length})*\n${lines.join('\n')}`
+                : '📋 No added trivia questions yet.';
+            const more = added.length > 20 ? `\n_…and ${added.length - 20} more — refine with \`!game listq <search>\`._` : '';
+            return { handled: true, reply: `${head}${more}\n\n🧠 Pool: ${poolSummary()}` };
+        }
+
+        const needle = questionKey(query);
+        if (!needle) {
+            return { handled: true, react: '⚠️', reply: '⚠️ Type something to search for: `!game listq capital`' };
+        }
+        const matches = [];
+        added.forEach((e, i) => {
+            if (questionKey(e.q).includes(needle)) matches.push({ tag: `added #${i + 1}`, entry: e });
+        });
+        for (const e of content?.questions?.() || []) {
+            if (questionKey(e.q).includes(needle)) matches.push({ tag: 'AI', entry: e });
+        }
+        for (const e of TRIVIA) {
+            if (!questionKey(e.q).includes(needle)) continue;
+            const tag = scores.isBuiltinHidden?.(e.q) ? 'built-in (deleted)'
+                : scores.builtinAnswer?.(e.q) ? 'built-in (modified)' : 'built-in';
+            matches.push({ tag, entry: e });
+        }
+        if (!matches.length) {
+            return {
+                handled: true,
+                react: 'ℹ️',
+                reply: `ℹ️ No trivia question matches *${short(query, 60)}*.\n\n🧠 Pool: ${poolSummary()}`
+            };
+        }
+        const shown = matches.slice(0, 10).map((m) => `• [${m.tag}] ${short(m.entry.q)}`);
+        const more = matches.length > 10 ? `\n_…and ${matches.length - 10} more — be more specific._` : '';
+        return {
+            handled: true,
+            reply: `🔎 *${matches.length} match${matches.length === 1 ? '' : 'es'} for “${short(query, 60)}”*\n`
+                + shown.join('\n') + more
+        };
+    }
+
+    /** `!game restore` — owner-only: bring back hidden built-ins and clear modified built-in answers. */
+    function restoreHidden(ctx) {
+        if (!ctx.isOwner) return ownerOnly();
+        if (!scores?.restoreBuiltins) return { handled: true, react: '⚠️', reply: '⚠️ The question pool is not available.' };
+        const { restored, saved } = scores.restoreBuiltins();
+        const cleared = scores.clearBuiltinAnswers?.() || { cleared: 0, saved: true };
+        if (!restored && !cleared.cleared) {
+            return { handled: true, react: 'ℹ️', reply: 'ℹ️ No hidden built-in questions — nothing to restore.' };
+        }
+        const parts = [];
+        if (restored) parts.push(`Restored ${restored} hidden built-in trivia question(s).`);
+        if (cleared.cleared) parts.push(`Cleared ${cleared.cleared} modified built-in answer(s).`);
+        return {
+            handled: true,
+            react: '✅',
+            reply: `✅ ${parts.join(' ')}`
+                + (saved === false || cleared.saved === false ? ' ⚠️ Could not save to disk.' : '')
+        };
     }
 
     // ── timers ───────────────────────────────────────────────────────────────

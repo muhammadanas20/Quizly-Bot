@@ -9,6 +9,10 @@
  *                             (Baileys 7 gives the same human a phone-number JID
  *                             and/or a LID — the same trap !flag had to solve)
  *   questions[]               trivia questions contributed by the owner
+ *   hiddenTrivia[]            normalised keys of built-in trivia questions the
+ *                             owner deleted with !game delete (never asked again)
+ *   triviaOverrides{}         normalised key → {a:[...]} answers the owner set
+ *                             with !game modify on a built-in question
  *   settings.gamesEnabled     owner switch; survives a restart independently of GAMES
  *
  * Generated daily content lives separately in game-content.json, so resetting
@@ -42,8 +46,16 @@ export function canonicalKey(ids) {
 
 const clean = (s, max) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 
+/**
+ * Normalised form used to compare trivia questions: case- and
+ * punctuation-insensitive, so “What is the capital of Japan?” matches
+ * “what is the capital of japan”. Shared with the game engine so finding a
+ * question and deleting it can never disagree.
+ */
+export const questionKey = (s) => String(s ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+
 export function createScoreStore({ file, log, maxQuestions = MAX_QUESTIONS } = {}) {
-    let data = { version: VERSION, chats: {}, questions: [], settings: {} };
+    let data = { version: VERSION, chats: {}, questions: [], hiddenTrivia: [], triviaOverrides: {}, settings: {} };
     let saveTimer = null;
 
     // ── persistence ──────────────────────────────────────────────────────────
@@ -57,6 +69,13 @@ export function createScoreStore({ file, log, maxQuestions = MAX_QUESTIONS } = {
                         version  : VERSION,
                         chats    : parsed.chats && typeof parsed.chats === 'object' ? parsed.chats : {},
                         questions: Array.isArray(parsed.questions) ? parsed.questions : [],
+                        hiddenTrivia: Array.isArray(parsed.hiddenTrivia)
+                            ? parsed.hiddenTrivia.filter((k) => typeof k === 'string' && k)
+                            : [],
+                        triviaOverrides: parsed.triviaOverrides && typeof parsed.triviaOverrides === 'object' && !Array.isArray(parsed.triviaOverrides)
+                            ? Object.fromEntries(Object.entries(parsed.triviaOverrides)
+                                .filter(([, v]) => v && Array.isArray(v.a) && v.a.length && v.a.every((s) => typeof s === 'string')))
+                            : {},
                         settings : {
                             ...(typeof parsed.settings?.gamesEnabled === 'boolean'
                                 ? { gamesEnabled: parsed.settings.gamesEnabled } : {}),
@@ -325,8 +344,8 @@ export function createScoreStore({ file, log, maxQuestions = MAX_QUESTIONS } = {
         if (!answers.length) return { ok: false, error: 'the answer is missing' };
         if (answers.some((x) => x.length < 1)) return { ok: false, error: 'the answer is too short' };
 
-        const normal = question.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
-        if (data.questions.some((e) => String(e.q).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim() === normal)) {
+        const normal = questionKey(question);
+        if (data.questions.some((e) => questionKey(e.q) === normal)) {
             return { ok: false, error: 'that question is already in the pool' };
         }
         if (data.questions.length >= maxQuestions) {
@@ -347,6 +366,125 @@ export function createScoreStore({ file, log, maxQuestions = MAX_QUESTIONS } = {
     }
 
     const questions = () => data.questions;
+
+    /**
+     * Find contributed questions matching a query, case- and
+     * punctuation-insensitive.
+     * @returns {Array<{entry:object, index:number, exact:boolean}>}
+     */
+    function findQuestions(query) {
+        const needle = questionKey(query);
+        if (!needle) return [];
+        const out = [];
+        data.questions.forEach((entry, index) => {
+            const key = questionKey(entry.q);
+            if (!key) return;
+            if (key === needle) out.push({ entry, index, exact: true });
+            else if (key.includes(needle)) out.push({ entry, index, exact: false });
+        });
+        return out;
+    }
+
+    /**
+     * Owner: delete one contributed question by its 0-based index
+     * (`!game listq` shows the 1-based numbers).
+     * @returns {{ok:boolean, error?:string, entry?:object, index?:number, saved?:boolean}}
+     */
+    function removeQuestionAt(index) {
+        const i = Number(index);
+        if (!Number.isInteger(i) || i < 0 || i >= data.questions.length) {
+            return {
+                ok: false,
+                error: data.questions.length
+                    ? `there is no added question #${i + 1}`
+                    : 'the added-question pool is empty'
+            };
+        }
+        const [entry] = data.questions.splice(i, 1);
+        return { ok: true, entry, index: i, saved: flush() };
+    }
+
+    /**
+     * Owner: hide one built-in trivia question so it is never asked again.
+     * Built-ins ship with the code, so hiding (persisted here) is the delete.
+     */
+    function hideBuiltinTrivia(q) {
+        const key = questionKey(q);
+        if (!key) return { ok: false, error: 'the question is empty' };
+        if (!Array.isArray(data.hiddenTrivia)) data.hiddenTrivia = [];
+        if (data.hiddenTrivia.includes(key)) {
+            return { ok: false, error: 'that question is already deleted', duplicate: true };
+        }
+        data.hiddenTrivia.push(key);
+        return { ok: true, key, saved: flush(), hidden: data.hiddenTrivia.length };
+    }
+
+    const isBuiltinHidden = (q) =>
+        Array.isArray(data.hiddenTrivia) && data.hiddenTrivia.includes(questionKey(q));
+
+    /**
+     * Owner: change the answers of one contributed question by its 0-based
+     * index (`!game listq` shows the 1-based numbers).
+     * @returns {{ok:boolean, error?:string, entry?:object, before?:string[], index?:number, saved?:boolean}}
+     */
+    function updateQuestionAt(index, answers) {
+        const i = Number(index);
+        if (!Number.isInteger(i) || i < 0 || i >= data.questions.length) {
+            return {
+                ok: false,
+                error: data.questions.length
+                    ? `there is no added question #${i + 1}`
+                    : 'the added-question pool is empty'
+            };
+        }
+        const list = (Array.isArray(answers) ? answers : [answers])
+            .map((s) => clean(s, ANSWER_MAX_LEN))
+            .filter(Boolean)
+            .slice(0, 4);
+        if (!list.length) return { ok: false, error: 'the answer is missing' };
+        const entry = data.questions[i];
+        const before = [...entry.a];
+        entry.a = list;
+        return { ok: true, entry, before, index: i, saved: flush() };
+    }
+
+    /**
+     * Owner: override the answers of one built-in trivia question. Built-ins
+     * ship with the code, so the override lives here and is applied on top
+     * when a round is drawn; `!game restore` clears it back to the original.
+     */
+    function setBuiltinAnswer(q, answers) {
+        const key = questionKey(q);
+        if (!key) return { ok: false, error: 'the question is empty' };
+        const list = (Array.isArray(answers) ? answers : [answers])
+            .map((s) => clean(s, ANSWER_MAX_LEN))
+            .filter(Boolean)
+            .slice(0, 4);
+        if (!list.length) return { ok: false, error: 'the answer is missing' };
+        if (!data.triviaOverrides || typeof data.triviaOverrides !== 'object') data.triviaOverrides = {};
+        data.triviaOverrides[key] = { a: list, at: new Date().toISOString() };
+        return { ok: true, key, answers: list, saved: flush() };
+    }
+
+    /** The owner's answers for a built-in question, or null when untouched. */
+    const builtinAnswer = (q) => {
+        const hit = data.triviaOverrides?.[questionKey(q)];
+        return hit && Array.isArray(hit.a) && hit.a.length ? [...hit.a] : null;
+    };
+
+    /** Owner: forget every modified built-in answer. */
+    function clearBuiltinAnswers() {
+        const cleared = data.triviaOverrides ? Object.keys(data.triviaOverrides).length : 0;
+        data.triviaOverrides = {};
+        return { cleared, saved: cleared ? flush() : true };
+    }
+
+    /** Owner: bring back every hidden built-in trivia question. */
+    function restoreBuiltins() {
+        const restored = Array.isArray(data.hiddenTrivia) ? data.hiddenTrivia.length : 0;
+        data.hiddenTrivia = [];
+        return { restored, saved: restored ? flush() : true };
+    }
 
     const api = {
         load,
@@ -372,11 +510,23 @@ export function createScoreStore({ file, log, maxQuestions = MAX_QUESTIONS } = {
         totals,
         addQuestion,
         questions,
+        findQuestions,
+        removeQuestionAt,
+        updateQuestionAt,
+        hideBuiltinTrivia,
+        isBuiltinHidden,
+        setBuiltinAnswer,
+        builtinAnswer,
+        clearBuiltinAnswers,
+        restoreBuiltins,
         get playerCount() {
             return Object.values(data.chats).reduce((n, c) => n + Object.keys(c.players || {}).length, 0);
         },
         get questionCount() {
             return data.questions.length;
+        },
+        get hiddenTriviaCount() {
+            return Array.isArray(data.hiddenTrivia) ? data.hiddenTrivia.length : 0;
         }
     };
 

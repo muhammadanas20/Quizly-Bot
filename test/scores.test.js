@@ -144,6 +144,101 @@ test('a duplicate or empty question is refused with a reason', () => {
     assert.equal(store.questionCount, 1);
 });
 
+test('added questions can be found and removed by the owner', () => {
+    const { store, file } = world();
+    store.addQuestion({ q: 'Which city is the capital of Japan?', a: ['Tokyo'] });
+    store.addQuestion({ q: 'What instrument measures air pressure?', a: ['barometer'] });
+
+    assert.deepEqual(
+        store.findQuestions('Which city is the capital of Japan?').map((m) => [m.index, m.exact]),
+        [[0, true]]
+    );
+    assert.deepEqual(
+        store.findQuestions('capital').map((m) => [m.index, m.exact]),
+        [[0, false]],
+        'a substring is a partial match'
+    );
+    assert.deepEqual(store.findQuestions('xyzzy'), []);
+    assert.deepEqual(store.findQuestions('   '), []);
+
+    const gone = store.removeQuestionAt(0);
+    assert.equal(gone.ok, true);
+    assert.equal(gone.entry.q, 'Which city is the capital of Japan?');
+    assert.equal(store.questionCount, 1);
+    assert.equal(store.questions()[0].q, 'What instrument measures air pressure?');
+
+    assert.equal(store.removeQuestionAt(5).ok, false);
+    assert.equal(store.removeQuestionAt(-1).ok, false);
+    assert.equal(store.questionCount, 1, 'a bad index removes nothing');
+
+    const reopened = createScoreStore({ file }).load();
+    assert.equal(reopened.questionCount, 1, 'the removal survives a restart');
+    assert.equal(reopened.questions()[0].q, 'What instrument measures air pressure?');
+});
+
+test('built-in trivia can be hidden and restored', () => {
+    const { store, file } = world();
+    assert.equal(store.hiddenTriviaCount, 0);
+    assert.equal(store.isBuiltinHidden('What is the capital of Pakistan?'), false);
+
+    assert.equal(store.hideBuiltinTrivia('What is the capital of Pakistan?').ok, true);
+    assert.equal(store.hiddenTriviaCount, 1);
+    assert.equal(
+        store.isBuiltinHidden('what is the capital of pakistan'),
+        true,
+        'matching ignores case and punctuation'
+    );
+    assert.equal(store.hideBuiltinTrivia('What is the capital of Pakistan?').ok, false, 'hiding twice is refused');
+
+    const reopened = createScoreStore({ file }).load();
+    assert.equal(reopened.hiddenTriviaCount, 1, 'hidden survives a restart');
+    assert.equal(reopened.isBuiltinHidden('What is the capital of Pakistan?'), true);
+
+    assert.deepEqual(store.restoreBuiltins().restored, 1);
+    assert.equal(store.isBuiltinHidden('What is the capital of Pakistan?'), false);
+    assert.equal(createScoreStore({ file }).load().hiddenTriviaCount, 0);
+    assert.deepEqual(store.restoreBuiltins(), { restored: 0, saved: true });
+});
+
+test('added answers can be updated by the owner', () => {
+    const { store, file } = world();
+    store.addQuestion({ q: 'Which planet has rings?', a: ['Jupiter'] });
+
+    assert.equal(store.updateQuestionAt(3, ['Saturn']).ok, false);
+    assert.equal(store.updateQuestionAt(0, ['   ']).ok, false);
+
+    const ok = store.updateQuestionAt(0, ['Saturn', 'the ringed one']);
+    assert.equal(ok.ok, true);
+    assert.deepEqual(ok.before, ['Jupiter']);
+    assert.deepEqual(store.questions()[0].a, ['Saturn', 'the ringed one']);
+    assert.equal(store.questions()[0].q, 'Which planet has rings?', 'the question itself is untouched');
+    assert.equal(
+        createScoreStore({ file }).load().questions()[0].a[0],
+        'Saturn',
+        'the fix survives a restart'
+    );
+});
+
+test('built-in answers can be overridden and cleared', () => {
+    const { store, file } = world();
+    assert.equal(store.builtinAnswer('What is the capital of Pakistan?'), null);
+
+    assert.equal(store.setBuiltinAnswer('What is the capital of Pakistan?', ['Islamabad!']).ok, true);
+    assert.deepEqual(store.builtinAnswer('what is the capital of pakistan'), ['Islamabad!']);
+    assert.equal(store.setBuiltinAnswer('What is the capital of Pakistan?', ['  ']).ok, false);
+
+    const reopened = createScoreStore({ file }).load();
+    assert.deepEqual(
+        reopened.builtinAnswer('What is the capital of Pakistan?'),
+        ['Islamabad!'],
+        'the override survives a restart'
+    );
+
+    assert.deepEqual(store.clearBuiltinAnswers(), { cleared: 1, saved: true });
+    assert.equal(store.builtinAnswer('What is the capital of Pakistan?'), null);
+    assert.equal(createScoreStore({ file }).load().builtinAnswer('What is the capital of Pakistan?'), null);
+});
+
 test('the trivia pool is capped', () => {
     const { store } = world();
     const tiny = createScoreStore({ file: null, maxQuestions: 2 }).load();
