@@ -150,6 +150,14 @@ are on or off. The first ten questions you add are still worth +2 points each:
 !game trivia
 ```
 
+Deleting is owner-only too. `!game delete <question or number>` removes a
+trivia question from any pool — one you added, an AI one, or a built-in (which
+is hidden and never asked again). `!game listq` numbers your added questions,
+`!game listq <search>` searches every pool, and `!game restore` brings back
+hidden built-ins. A member who tries any of these gets the same single ⛔, and
+curation works even while games are off, so the pool can be cleaned before
+reopening.
+
 **Owner controls (global, persistent):**
 
 | Command | Effect |
@@ -181,7 +189,8 @@ next provider (groq → gemini → groq …) so no API gets a burst:
 
 Failures keep the current pool and back off per category. Built-in questions
 (82 trivia, 116 words, 66 maths concept, 75 programming) and contributed questions
-are never removed. Groq generation uses `GROQ_TEXT_MODEL` (default
+are never removed by the rotation — but the owner can delete any trivia question
+at any time with `!game delete`. Groq generation uses `GROQ_TEXT_MODEL` (default
 `openai/gpt-oss-120b`) because Groq retired the old llama-4-scout model.
 
 ### Instant randomness (no round, no scoreboard)
@@ -231,6 +240,9 @@ GAME_AI_CODE_COUNT=16
 | `!game reset tops` | owner | reset ALL leaderboards and cancel rounds; preserve questions |
 | `!game reset @member [all]` | owner | reset one member's points (this chat / every chat) |
 | `!game addq Q ; A` | owner | add a trivia question to the pool (`add` / `contribute` work too) |
+| `!game delete Q` / `!game delete 3` | owner | delete a trivia question by text or by its `!game listq` number (added, AI or built-in) |
+| `!game listq [search]` | owner | list added trivia questions, or search every pool |
+| `!game restore` | owner | bring back hidden built-in trivia questions |
 | `!random` `!roll` `!flip` `!pick` `!shuffle` `!8ball` | anyone | instant randomness, no round needed |
 | `!flag <@person or number> [reason]` | owner | flag a member; stickers and photos (including view-once) are removed by default |
 | `!unflag <@person or number>` | owner | remove a flag |
