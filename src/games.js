@@ -1141,6 +1141,27 @@ export function createGameEngine({
     async function handle(ctx, args = []) {
         const sub = String(args[0] || '').toLowerCase();
 
+        if (sub === 'answer') {
+            if (!ctx.isOwner) return ownerOnly();
+            const round = active(ctx.jid);
+            if (!round) return { handled: true, react: 'ℹ️', reply: 'ℹ️ No active question in this chat.' };
+            const answer = round.accepted?.join(' / ') || round.answer || round.target;
+            return { handled: true, react: '🔑', reply: answer ? `🔑 Answer: *${answer}*` : 'ℹ️ This game has no single answer.' };
+        }
+        if (sub === 'add' && String(args[1] || '').toLowerCase() === 'new') {
+            if (!ctx.isOwner) return ownerOnly();
+            const moduleName = String(args[2] || '').toLowerCase();
+            const aliases = { coal: ['code', 'coal'], pf: ['code', 'pf'], oop: ['code', 'oop'], ds: ['code', 'ds'], trivia: ['trivia', null], math: ['math', null], calculus: ['math', 'calculus'], mvc: ['math', 'mvc'], linear: ['math', 'linear'], scramble: ['scramble', null] };
+            const picked = aliases[moduleName];
+            if (!picked) return { handled: true, react: '⚠️', reply: 'Usage: `!game add new coal|pf|oop|ds|trivia|math|scramble`' };
+            try {
+                const added = await content?.generateAndAdd?.(...picked);
+                if (!added?.length) throw new Error('question generator is unavailable');
+                return { handled: true, react: '✅', reply: `✅ Generated and added ${added.length} new ${moduleName} question(s) to the game pool.` };
+            } catch (err) {
+                return { handled: true, react: '⚠️', reply: `⚠️ Could not generate ${moduleName} questions; nothing was added. ${err.message}` };
+            }
+        }
         if (sub === 'status') return { handled: true, reply: statusText(ctx) };
         if (sub === 'mode' || sub === 'level' || sub === 'difficulty') {
             const want = String(args[1] || '').toLowerCase();
