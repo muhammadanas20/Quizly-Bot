@@ -435,6 +435,32 @@ export function createGameContentStore({
         return removed;
     }
 
+    /**
+     * Owner: replace the answers of matching items in one pool
+     * (used by `!game modify`). Only QA pools carry answers.
+     * @param {string} category
+     * @param {(item:object)=>boolean} test items to update
+     * @param {string[]} answers the new accepted answers
+     * @returns {Array<object>} the updated items
+     */
+    function updateAnswers(category, test, answers) {
+        if (!CATEGORIES.includes(category)) throw new Error(`unknown module ${category}`);
+        const pool = pools[category];
+        const idx = [];
+        pool.items.forEach((item, n) => { if (test(item)) idx.push(n); });
+        if (!idx.length) return [];
+        const previous = pools[category];
+        pools[category] = {
+            generatedAt: pool.generatedAt,
+            items: pool.items.map((i) => (test(i) ? { ...i, a: [...answers] } : i))
+        };
+        try { persist(); } catch (err) { pools[category] = previous; throw err; }
+        log?.info?.(`game content: updated answers on ${idx.length} ${category} item(s) by owner request`);
+        // By index: the caller may match by identity, which would fail on the
+        // replaced objects if the predicate ran again.
+        return idx.map((n) => pools[category].items[n]);
+    }
+
     async function generateAndAdd(category, topic = null) {
         if (!CATEGORIES.includes(category)) throw new Error(`unknown module ${category}`);
         const avoid = [...builtinsFor(category), ...pools[category].items];
@@ -460,7 +486,7 @@ export function createGameContentStore({
 
     const api = {
         load, start, pause, close, refreshIfStale, items, markUsed, status, generateAndAdd,
-        remove: removeItems,
+        remove: removeItems, updateAnswers,
         questions: () => pools.trivia.items,
         puzzles: () => pools.scramble.items,
         get generatedAt() { return pools.trivia.generatedAt || pools.scramble.generatedAt; },

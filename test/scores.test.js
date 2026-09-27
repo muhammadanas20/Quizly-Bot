@@ -200,6 +200,45 @@ test('built-in trivia can be hidden and restored', () => {
     assert.deepEqual(store.restoreBuiltins(), { restored: 0, saved: true });
 });
 
+test('added answers can be updated by the owner', () => {
+    const { store, file } = world();
+    store.addQuestion({ q: 'Which planet has rings?', a: ['Jupiter'] });
+
+    assert.equal(store.updateQuestionAt(3, ['Saturn']).ok, false);
+    assert.equal(store.updateQuestionAt(0, ['   ']).ok, false);
+
+    const ok = store.updateQuestionAt(0, ['Saturn', 'the ringed one']);
+    assert.equal(ok.ok, true);
+    assert.deepEqual(ok.before, ['Jupiter']);
+    assert.deepEqual(store.questions()[0].a, ['Saturn', 'the ringed one']);
+    assert.equal(store.questions()[0].q, 'Which planet has rings?', 'the question itself is untouched');
+    assert.equal(
+        createScoreStore({ file }).load().questions()[0].a[0],
+        'Saturn',
+        'the fix survives a restart'
+    );
+});
+
+test('built-in answers can be overridden and cleared', () => {
+    const { store, file } = world();
+    assert.equal(store.builtinAnswer('What is the capital of Pakistan?'), null);
+
+    assert.equal(store.setBuiltinAnswer('What is the capital of Pakistan?', ['Islamabad!']).ok, true);
+    assert.deepEqual(store.builtinAnswer('what is the capital of pakistan'), ['Islamabad!']);
+    assert.equal(store.setBuiltinAnswer('What is the capital of Pakistan?', ['  ']).ok, false);
+
+    const reopened = createScoreStore({ file }).load();
+    assert.deepEqual(
+        reopened.builtinAnswer('What is the capital of Pakistan?'),
+        ['Islamabad!'],
+        'the override survives a restart'
+    );
+
+    assert.deepEqual(store.clearBuiltinAnswers(), { cleared: 1, saved: true });
+    assert.equal(store.builtinAnswer('What is the capital of Pakistan?'), null);
+    assert.equal(createScoreStore({ file }).load().builtinAnswer('What is the capital of Pakistan?'), null);
+});
+
 test('the trivia pool is capped', () => {
     const { store } = world();
     const tiny = createScoreStore({ file: null, maxQuestions: 2 }).load();

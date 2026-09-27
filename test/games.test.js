@@ -1031,3 +1031,137 @@ test('delete/listq/restore work while games are off, but stay owner-only', async
     assert.equal(del.react, '🗑️');
     assert.equal(scores.questionCount, 0);
 });
+
+// ── modifying trivia ─────────────────────────────────────────────────────────
+test('!game modify changes an added answer by number, owner only', async () => {
+    const { games, scores } = world();
+    scores.addQuestion({ q: 'Which planet has rings?', a: ['Jupiter'], by: 'Ali', byKey: PN });
+
+    const member = await games.handle(asSana('!game modify 1 ; Saturn'), ['modify', '1', ';', 'Saturn']);
+    assert.equal(member.react, '⛔');
+    assert.match(member.reply, /Only the bot owner/);
+    assert.deepEqual(scores.questions()[0].a, ['Jupiter'], 'a member modifies nothing');
+
+    for (const alias of ['mod', 'edit', 'update']) {
+        const denied = await games.handle(asSana(`!game ${alias} 1 ; Saturn`), [alias, '1', ';', 'Saturn']);
+        assert.equal(denied.react, '⛔', `!game ${alias} is gated too`);
+    }
+
+    const usage = await games.handle(asAli('!game modify 1 Saturn', { isOwner: true }), ['modify', '1', 'Saturn']);
+    assert.match(usage.reply, /Usage: `?!game modify/);
+
+    const bad = await games.handle(asAli('!game modify 5 ; Saturn', { isOwner: true }), ['modify', '5', ';', 'Saturn']);
+    assert.equal(bad.react, '⚠️');
+    assert.match(bad.reply, /no added question #5/);
+
+    const ok = await games.handle(
+        asAli('!game modify 1 ; Saturn/ringed one', { isOwner: true }),
+        ['modify', '1', ';', 'Saturn/ringed', 'one']
+    );
+    assert.equal(ok.react, '✏️');
+    assert.match(ok.reply, /Updated added question #1/);
+    assert.match(ok.reply, /Jupiter/);
+    assert.match(ok.reply, /Saturn/);
+    assert.deepEqual(scores.questions()[0].a, ['Saturn', 'ringed one']);
+});
+
+test('!game modify accepts a colon separator and updates every pool', async () => {
+    let ai = [{ q: 'Which planet is known for its rings?', a: ['Jupiter'] }];
+    const content = {
+        questions: () => ai,
+        updateAnswers: (category, test, answers) => {
+            assert.equal(category, 'trivia');
+            for (const i of ai) if (test(i)) i.a = [...answers];
+            return ai.filter(test);
+        }
+    };
+    const { games, scores } = world({ content });
+    scores.addQuestion({ q: 'Which planet has rings?', a: ['Jupiter'] });
+
+    const added = await games.handle(
+        asAli('!game modify Which planet has rings? : Saturn', { isOwner: true }),
+        ['modify', 'Which', 'planet', 'has', 'rings?', ':', 'Saturn']
+    );
+    assert.equal(added.react, '✏️');
+    assert.match(added.reply, /added #1/);
+    assert.deepEqual(scores.questions()[0].a, ['Saturn']);
+
+    const aiMod = await games.handle(
+        asAli('!game modify Which planet is known for its rings? ; Saturn', { isOwner: true }),
+        ['modify', 'Which', 'planet', 'is', 'known', 'for', 'its', 'rings?', ';', 'Saturn']
+    );
+    assert.equal(aiMod.react, '✏️');
+    assert.match(aiMod.reply, /AI pool/);
+    assert.deepEqual(ai[0].a, ['Saturn']);
+
+    const builtin = TRIVIA[0].q;
+    const original = [...TRIVIA[0].a];
+    const bi = await games.handle(
+        asAli(`!game modify ${builtin} ; New answer`, { isOwner: true }),
+        ['modify', ...builtin.split(' '), ';', 'New', 'answer']
+    );
+    assert.equal(bi.react, '✏️');
+    assert.match(bi.reply, /built-in/);
+    assert.deepEqual(scores.builtinAnswer(builtin), ['New answer']);
+    assert.deepEqual(TRIVIA[0].a, original, 'the shipped pool is untouched');
+
+    const search = await games.handle(asAli('!game listq capital of pakistan', { isOwner: true }), ['listq', 'capital', 'of', 'pakistan']);
+    assert.match(search.reply, /\[built-in \(modified\)\]/);
+});
+
+test('a modified built-in answer is what rounds ask until !game restore', async () => {
+    const { games, scores, tick, config } = world();
+    const target = TRIVIA[5].q;
+    for (const e of TRIVIA) if (e.q !== target) scores.hideBuiltinTrivia(e.q);
+    scores.setBuiltinAnswer(target, ['fixed answer']);
+
+    await games.handle(asAli('!game trivia'), ['trivia']);
+    const round = games.active(GROUP);
+    assert.equal(round.pool.q, target);
+    assert.deepEqual(round.accepted, ['fixed answer']);
+
+    const win = await games.handleMessage(asAli('fixed answer'));
+    assert.equal(win.react, '🎉');
+
+    tick(config.gameCooldownMs + 1);
+    const restored = await games.handle(asAli('!game restore', { isOwner: true }), ['restore']);
+    assert.match(restored.reply, new RegExp(`Restored ${TRIVIA.length - 1} hidden`));
+    assert.match(restored.reply, /Cleared 1 modified/);
+    assert.equal(scores.builtinAnswer(target), null);
+
+    await games.handle(asAli('!game trivia'), ['trivia']);
+    assert.notDeepEqual(games.active(GROUP).accepted, ['fixed answer']);
+});
+
+test('!game modify with an ambiguous question changes nothing', async () => {
+    const { games, scores } = world();
+    scores.addQuestion({ q: 'What is the capital of Japan?', a: ['Tokyo'] });
+
+    const out = await games.handle(asAli('!game modify capital of ; Paris', { isOwner: true }), ['modify', 'capital', 'of', ';', 'Paris']);
+    assert.equal(out.react, '⚠️');
+    assert.match(out.reply, /be more specific/);
+    assert.deepEqual(scores.questions()[0].a, ['Tokyo'], 'nothing is modified');
+    assert.equal(scores.hiddenTriviaCount, 0);
+
+    const missing = await games.handle(asAli('!game modify xyzzy ; nope', { isOwner: true }), ['modify', 'xyzzy', ';', 'nope']);
+    assert.equal(missing.react, 'ℹ️');
+    assert.match(missing.reply, /No trivia question matches/);
+
+    scores.hideBuiltinTrivia('What do bees make?');
+    const gone = await games.handle(asAli('!game modify what do bees make ; honey', { isOwner: true }), ['modify', 'what', 'do', 'bees', 'make', ';', 'honey']);
+    assert.match(gone.reply, /is deleted/);
+});
+
+test('!game modify works while games are off, but stays owner-only', async () => {
+    const { games, scores } = world();
+    scores.addQuestion({ q: 'Which planet has rings?', a: ['Jupiter'] });
+    await games.handle(asAli('!game stop', { isOwner: true }), ['stop']);
+    assert.equal(games.enabled, false);
+
+    const denied = await games.handle(asSana('!game modify 1 ; Saturn'), ['modify', '1', ';', 'Saturn']);
+    assert.equal(denied.react, '⛔');
+
+    const ok = await games.handle(asAli('!game modify 1 ; Saturn', { isOwner: true }), ['modify', '1', ';', 'Saturn']);
+    assert.equal(ok.react, '✏️');
+    assert.deepEqual(scores.questions()[0].a, ['Saturn']);
+});

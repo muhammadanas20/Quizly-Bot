@@ -246,6 +246,34 @@ test('owner can remove AI items from a pool and the removal persists', async (t)
     store.close();
 });
 
+test('owner can update AI answers and the fix persists', async (t) => {
+    const file = disk(t);
+    const calls = [];
+    const store = createGameContentStore({ file, config, now: () => Date.UTC(2026, 8, 25), generate: fakeGenerate(calls), gapMs: 0 }).load();
+    await store.refreshIfStale();
+    const [first, second] = store.questions();
+
+    const updated = store.updateAnswers('trivia', (item) => item.q === first.q, ['fixed']);
+    assert.equal(updated.length, 1);
+    assert.deepEqual(updated[0].a, ['fixed']);
+    assert.equal(updated[0].q, first.q, 'the question itself is untouched');
+    assert.deepEqual(store.questions()[1].a, second.a, 'other items are untouched');
+
+    // The engine matches by identity — the replaced objects must still be returned.
+    const hit = store.questions()[1];
+    const again = store.updateAnswers('trivia', (item) => item === hit, ['fixed2']);
+    assert.equal(again.length, 1);
+    assert.deepEqual(store.questions()[1].a, ['fixed2']);
+    assert.deepEqual(store.updateAnswers('trivia', () => false, ['x']), []);
+    assert.deepEqual(
+        createGameContentStore({ file, config }).load().questions()[0].a,
+        ['fixed'],
+        'the fix survives a restart'
+    );
+    assert.throws(() => store.updateAnswers('nope', () => true, ['x']), /unknown module/);
+    store.close();
+});
+
 test('v1 files migrate; corrupt/oversized files fall back to built-ins', (t) => {
     const file = disk(t);
     fs.writeFileSync(file, JSON.stringify({

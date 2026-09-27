@@ -13,6 +13,7 @@
  *   !game on|stop|reset tops|reset @member  owner — game controls
  *   !game addq Q ; A                        owner — curate the trivia pool
  *   !game delete Q|# / !game listq         owner — delete / list trivia questions
+ *   !game modify Q ; A                     owner — fix a trivia answer
  *   !guess <answer>  !in  !top               anyone — those games' shortcuts
  *   !random !roll !flip !pick !shuffle !8ball  anyone — instant randomness
  *
@@ -95,6 +96,7 @@ export const HELP_TEXT = [
     `${PREFIX}game status            games on/off + daily content`,
     `${PREFIX}game addq Q ; A        add a trivia question (owner only)`,
     `${PREFIX}game delete Q|#        delete a trivia question (owner only)`,
+    `${PREFIX}game modify Q ; A      fix a trivia answer (owner only)`,
     `${PREFIX}game listq [search]    list added trivia / search all (owner only)`,
     `${PREFIX}game answer           reveal current question answer (owner only)`,
     `${PREFIX}game add new coal     generate + add questions (owner only; pf/oop/ds/trivia/math/scramble)`,

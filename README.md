@@ -158,6 +158,11 @@ hidden built-ins. A member who tries any of these gets the same single ⛔, and
 curation works even while games are off, so the pool can be cleaned before
 reopening.
 
+A wrong answer is fixed the same way: `!game modify <question or number> ;
+<new answer>` (`:` works as the separator too, `/` adds another accepted
+spelling) updates it in any pool — including built-ins, whose original answer
+returns with `!game restore`.
+
 **Owner controls (global, persistent):**
 
 | Command | Effect |
@@ -241,8 +246,9 @@ GAME_AI_CODE_COUNT=16
 | `!game reset @member [all]` | owner | reset one member's points (this chat / every chat) |
 | `!game addq Q ; A` | owner | add a trivia question to the pool (`add` / `contribute` work too) |
 | `!game delete Q` / `!game delete 3` | owner | delete a trivia question by text or by its `!game listq` number (added, AI or built-in) |
+| `!game modify Q ; A` | owner | change a trivia question's answer (added, AI or built-in; `:` works too) |
 | `!game listq [search]` | owner | list added trivia questions, or search every pool |
-| `!game restore` | owner | bring back hidden built-in trivia questions |
+| `!game restore` | owner | bring back hidden built-ins; clear modified built-in answers |
 | `!random` `!roll` `!flip` `!pick` `!shuffle` `!8ball` | anyone | instant randomness, no round needed |
 | `!flag <@person or number> [reason]` | owner | flag a member; stickers and photos (including view-once) are removed by default |
 | `!unflag <@person or number>` | owner | remove a flag |
