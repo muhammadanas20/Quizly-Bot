@@ -416,6 +416,20 @@ export function createGameContentStore({
         return true;
     }
 
+    async function generateAndAdd(category, topic = null) {
+        if (!CATEGORIES.includes(category)) throw new Error(`unknown module ${category}`);
+        const avoid = [...builtinsFor(category), ...pools[category].items];
+        const batch = await generate({ category, count: Math.min(8, target[category] || 8), config, log, fetchImpl, avoid });
+        let additions = batch || [];
+        if (topic && ['math', 'code'].includes(category)) additions = additions.filter((item) => item.topic === topic);
+        additions = additions.filter((item) => !pools[category].items.some((old) => keyOf(old.q || old.word) === keyOf(item.q || item.word)));
+        if (!additions.length) throw new Error('AI returned no new valid questions for that module');
+        pools[category].items.push(...additions);
+        pools[category].generatedAt = now();
+        saveSoon();
+        return additions;
+    }
+
     function status() {
         return Object.fromEntries(CATEGORIES.map((c) => [c, {
             count: pools[c].items.length,
@@ -426,7 +440,7 @@ export function createGameContentStore({
     }
 
     const api = {
-        load, start, pause, close, refreshIfStale, items, markUsed, status,
+        load, start, pause, close, refreshIfStale, items, markUsed, status, generateAndAdd,
         questions: () => pools.trivia.items,
         puzzles: () => pools.scramble.items,
         get generatedAt() { return pools.trivia.generatedAt || pools.scramble.generatedAt; },
