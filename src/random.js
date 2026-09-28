@@ -116,18 +116,6 @@ export function flipCoin(random = Math.random) {
     return random() < 0.5 ? 'Heads' : 'Tails';
 }
 
-/**
- * "heads", "h", "head" → true; "tails", "t", "tail" → false; anything else null.
- * Used by both `!flip` and the coin game so they agree on the spellings.
- */
-export function parseCoinCall(text) {
-    const s = String(text ?? '').trim().toLowerCase();
-    if (!s) return null;
-    if (/^(h|head|heads|up)$/.test(s)) return true;
-    if (/^(t|tail|tails|down)$/.test(s)) return false;
-    return null;
-}
-
 export function eightBall(random = Math.random) {
     return pickOne(EIGHT_BALL, random);
 }

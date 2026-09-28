@@ -1,7 +1,7 @@
 /**
- * src/game-content.js — rotating AI pools for trivia, scramble, math and code.
+ * src/game-content.js — rotating AI pools for trivia, riddles, scramble, math and code.
  *
- * Four categories, each generated in its OWN small batch (one request each,
+ * Five categories, each generated in its OWN small batch (one request each,
  * never all at once) so no provider is hit with a big burst:
  *
  *   trivia, scramble   every GAME_AI_TRIVIA_HOURS (5h). If anybody played an
@@ -22,7 +22,7 @@ import path from 'node:path';
 
 import { AiError } from './ai/http.js';
 import { runAI } from './ai/solve.js';
-import { TRIVIA, WORDS } from './games.js';
+import { TRIVIA, RIDDLES, WORDS } from './games.js';
 import { MATH_BANK, CODE_BANK } from './banks.js';
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -31,7 +31,7 @@ const MAX_ITEMS = 40;
 const MAX_FILE_BYTES = 512 * 1024;
 export const BATCH_GAP_MS = 20_000;
 const TICK_MS = 5 * 60 * 1000;
-export const CATEGORIES = Object.freeze(['trivia', 'scramble', 'math', 'code']);
+export const CATEGORIES = Object.freeze(['trivia', 'riddle', 'scramble', 'math', 'code']);
 
 // ─── prompts + schemas ───────────────────────────────────────────────────────
 const QA_SCHEMA = {
@@ -65,7 +65,7 @@ const PUZZLE_SCHEMA = {
     },
     required: ['items']
 };
-export const SCHEMAS = { trivia: QA_SCHEMA, scramble: PUZZLE_SCHEMA, math: QA_SCHEMA, code: QA_SCHEMA };
+export const SCHEMAS = { trivia: QA_SCHEMA, riddle: QA_SCHEMA, scramble: PUZZLE_SCHEMA, math: QA_SCHEMA, code: QA_SCHEMA };
 
 const QA_RULES = 'Each "a" is an array of 1-4 accepted short spellings (a number, a word or a short expression, never a sentence). '
     + 'Half the items "level":"easy", half "level":"hard". No multiple-choice options. Every question must have ONE unambiguous answer. Keep each value on one line. JSON only, no markdown.';
@@ -76,6 +76,9 @@ export function contentPrompt(category, count, avoid = []) {
         case 'trivia':
             return `Create ${count} DIFFERENT family-friendly, timeless general-knowledge trivia questions for a WhatsApp group game (science, geography, history, sport, arts, technology).
 Return ONLY {"items":[{"q":"What instrument measures air pressure?","a":["barometer"],"level":"easy"}]}. ${QA_RULES}${skip}`;
+        case 'riddle':
+            return `Create ${count} DIFFERENT family-friendly riddles and brain teasers for a WhatsApp group game. Each riddle must have ONE short answer of at most three words (a concrete thing, a word or a number — never a sentence), with 1-4 accepted spellings such as the answer with and without an article. No guessing games about spelling tricks whose only answer is punctuation.
+Return ONLY {"items":[{"q":"What has many keys but can not open a single lock?","a":["piano","a piano"],"level":"easy"}]}. ${QA_RULES}${skip}`;
         case 'scramble':
             return `Create ${count} DIFFERENT word-scramble puzzles for a WhatsApp group game. Each word: one common English word, letters a-z only, 4-14 letters, not a proper name, with a short helpful clue that does not contain the word. "level" is "easy" for 4-7 letters, "hard" for 8+.
 Return ONLY {"items":[{"word":"metronome","clue":"Helps musicians keep time","level":"hard"}]}. JSON only.${skip}`;
@@ -140,6 +143,7 @@ export function normalizeItems(category, raw, { max = MAX_ITEMS, exclude = [] } 
 /** Everything a generated item must not duplicate. */
 function builtinsFor(category) {
     if (category === 'trivia') return TRIVIA;
+    if (category === 'riddle') return RIDDLES;
     if (category === 'scramble') return WORDS;
     if (category === 'math') return MATH_BANK;
     return CODE_BANK;
@@ -191,17 +195,19 @@ export function createGameContentStore({
 } = {}) {
     const cycleMs = {
         trivia  : (config.gameAiTriviaHours || 5) * HOUR_MS,
+        riddle  : (config.gameAiTriviaHours || 5) * HOUR_MS,
         scramble: (config.gameAiTriviaHours || 5) * HOUR_MS,
         math    : (config.gameAiStudyHours || 10) * HOUR_MS,
         code    : (config.gameAiStudyHours || 10) * HOUR_MS
     };
     const target = {
         trivia  : Math.min(config.gameAiTriviaCount || 16, MAX_ITEMS),
+        riddle  : Math.min(config.gameAiTriviaCount || 16, MAX_ITEMS),
         scramble: Math.min(config.gameAiPuzzleCount || 16, MAX_ITEMS),
         math    : Math.min(config.gameAiMathCount || 16, MAX_ITEMS),
         code    : Math.min(config.gameAiCodeCount || 16, MAX_ITEMS)
     };
-    const replaceAll = { trivia: true, scramble: true, math: false, code: false };
+    const replaceAll = { trivia: true, riddle: true, scramble: true, math: false, code: false };
 
     const pools = Object.fromEntries(CATEGORIES.map((c) => [c, { generatedAt: null, items: [] }]));
     const state = Object.fromEntries(CATEGORIES.map((c) => [c, { failures: 0, retryAt: 0 }]));

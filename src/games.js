@@ -4,8 +4,6 @@
  *   !game                      list every game + the commands that go with it
  *   !game <name> [args]        start a round in this chat
  *   !guess <answer> / !g       take a shot (plain replies work too)
- *   !in / !join                join the lucky draw
- *   !game draw                 pick the lucky winner early
  *   !game stop                 owner: stop ALL games; starter: end this round
  *   !game on                   owner: reopen games for everyone
  *   !game reset tops           owner: clear every leaderboard
@@ -20,7 +18,7 @@
  *   !game listq [search]       owner: list added trivia / search every pool
  *   !game restore              owner: bring back hidden built-ins, clear modified answers
  *
- * Seven games: number, coin, math, code, scramble, trivia, lucky.
+ * Seven games: number, riddle, rps, math, code, scramble, trivia.
  * Everyone plays, everyone scores (every attempt earns a participation point),
  * and the scoreboard is per group so a big group's leaderboard means something.
  *
@@ -35,7 +33,7 @@
 
 import { questionText, roundCard, GAME_GUIDE } from './presentation.js';
 
-import { randomInt, pickOne, shuffle, parseRange, parseCoinCall } from './random.js';
+import { randomInt, pickOne, shuffle, parseRange } from './random.js';
 import { MATH_BANK, CODE_BANK, parseTopic } from './banks.js';
 import { normalizeId } from './config.js';
 import { questionKey } from './scores.js';
@@ -164,15 +162,100 @@ export const TRIVIA = Object.freeze([
     { q: 'What is the frozen form of water called?', a: ['ice'] }
 ]);
 
+// ─── Built-in riddle pool — the tricky ones (AI riddles rotate on top) ───────
+export const RIDDLES = Object.freeze([
+    { q: 'I speak without a mouth and hear without ears. I have no body, but I come alive with the wind. What am I?', a: ['echo'] },
+    { q: 'The more of this there is, the less you can see. What is it?', a: ['darkness', 'dark'] },
+    { q: 'What has many keys but can not open a single lock?', a: ['piano', 'a piano', 'keyboard', 'a keyboard'] },
+    { q: 'What gets wetter and wetter the more it dries?', a: ['towel', 'a towel'] },
+    { q: 'I have cities but no houses, forests but no trees, and rivers but no water. What am I?', a: ['map', 'a map'] },
+    { q: 'What can travel around the world while staying in one corner?', a: ['stamp', 'a stamp', 'postage stamp'] },
+    { q: 'What has a neck but no head?', a: ['bottle', 'a bottle'] },
+    { q: 'The more you take away from me, the bigger I get. What am I?', a: ['hole', 'a hole', 'pit', 'a pit'] },
+    { q: 'I am tall when I am young and short when I am old. What am I?', a: ['candle', 'a candle'] },
+    { q: 'What has hands but can not clap?', a: ['clock', 'a clock'] },
+    { q: 'What can you catch but never throw?', a: ['cold', 'a cold'] },
+    { q: 'What has many teeth but can not bite?', a: ['comb', 'a comb'] },
+    { q: 'What goes up but never comes down?', a: ['age', 'your age'] },
+    { q: 'I shave several times a day, yet my beard stays the same. Who am I?', a: ['barber', 'a barber'] },
+    { q: 'What has one eye but can not see?', a: ['needle', 'a needle'] },
+    { q: 'The more you take, the more you leave behind. What are they?', a: ['footsteps', 'steps', 'footprints'] },
+    { q: 'What is full of holes but still holds water?', a: ['sponge', 'a sponge'] },
+    { q: 'What is always in front of you but can not be seen?', a: ['future', 'the future'] },
+    { q: 'What can you break without ever touching it?', a: ['promise', 'a promise', 'silence'] },
+    { q: 'Where does today come before yesterday?', a: ['dictionary', 'a dictionary', 'the dictionary'] },
+    { q: 'What invention lets you look right through a wall?', a: ['window', 'a window'] },
+    { q: 'What has thirteen hearts but no other organs?', a: ['deck of cards', 'a deck of cards', 'playing cards', 'cards'] },
+    { q: 'Which five letter word becomes shorter when you add two letters to it?', a: ['short'] },
+    { q: 'Which word is spelled wrong in every dictionary?', a: ['wrong', 'the word wrong'] },
+    { q: 'What kind of band never plays a single note?', a: ['rubber band', 'a rubber band'] },
+    { q: 'Forward I am heavy, but backward I am not. What am I?', a: ['ton', 'a ton'] },
+    { q: 'What is so fragile that saying its name breaks it?', a: ['silence'] },
+    { q: 'What can fill an entire room yet take up no space at all?', a: ['light'] },
+    { q: 'If you drop me I am sure to crack, but smile at me and I always smile back. What am I?', a: ['mirror', 'a mirror'] },
+    { q: 'The maker does not want it, the buyer does not use it, and the user never knows they are using it. What is it?', a: ['coffin', 'a coffin'] },
+    { q: 'Which room do ghosts avoid?', a: ['living room', 'the living room'] },
+    { q: 'I follow you all day in the sun, yet vanish when the rain or night comes. What am I?', a: ['shadow', 'a shadow', 'your shadow'] },
+    { q: 'What has a thumb and four fingers but is not alive?', a: ['glove', 'a glove'] },
+    { q: 'What starts with T, ends with T, and has tea in it?', a: ['teapot', 'a teapot'] },
+    { q: 'Which building has the most stories?', a: ['library', 'a library', 'the library'] },
+    { q: 'What has four wheels and flies?', a: ['garbage truck', 'a garbage truck', 'rubbish truck', 'dustbin lorry'] },
+    { q: 'I have branches, yet no trunk, no leaves and no fruit. What am I?', a: ['bank', 'a bank'] },
+    { q: 'What can go up a chimney down, but can not go down a chimney up?', a: ['umbrella', 'an umbrella'] },
+    { q: 'What is black when it is clean and white when it is dirty?', a: ['blackboard', 'a blackboard', 'chalkboard', 'a chalkboard'] },
+    { q: 'What word contains all twenty six letters?', a: ['alphabet', 'the alphabet'] },
+    { q: 'What starts with E, ends with E, and has one letter inside it?', a: ['envelope', 'an envelope'] },
+    { q: 'I am always hungry, I must always be fed, and the finger I touch will soon turn red. What am I?', a: ['fire', 'a fire'] },
+    { q: 'What kind of room has no doors or windows?', a: ['mushroom', 'a mushroom'] },
+    { q: 'What is at the end of every rainbow?', a: ['w', 'the letter w'] },
+    { q: 'What is yours, yet other people use it more than you do?', a: ['your name', 'my name', 'name'] },
+    { q: 'What goes through towns and hills but never moves?', a: ['road', 'a road', 'the road'] },
+    { q: 'I have a bed but never sleep, and a mouth but never speak. What am I?', a: ['river', 'a river'] },
+    { q: 'What can you serve, but never eat?', a: ['tennis ball', 'a tennis ball', 'volleyball', 'shuttlecock'] },
+    { q: 'Which letter of the alphabet has the most water?', a: ['c', 'sea', 'the letter c'] },
+    { q: 'What is the end of everything?', a: ['g', 'the letter g'] },
+    { q: 'What comes once in a minute, twice in a moment, but never in a thousand years?', a: ['m', 'the letter m'] },
+    { q: 'If you have me, you want to share me. But if you share me, you no longer have me. What am I?', a: ['secret', 'a secret'] },
+    { q: 'Turn me on my side and I am everything. Cut me in half and I am nothing. What am I?', a: ['8', 'eight', 'the number 8', 'infinity'] },
+    { q: 'What kind of ship has two mates but no captain?', a: ['relationship', 'a relationship'] },
+    { q: 'Where do fish keep their money?', a: ['riverbank', 'the riverbank', 'river bank', 'a river bank'] },
+    { q: 'A man was born in 1995 and died in 1953. How is that possible?', a: ['room numbers', 'room number', 'hospital room'] },
+    { q: 'How many months of the year have 28 days?', a: ['all', 'all of them', '12', 'twelve', 'every month'] },
+    { q: 'If a plane crashes exactly on the border between two countries, where do you bury the survivors?', a: ['nowhere', 'survivors', 'you do not bury survivors'] },
+    { q: 'What two things can you never eat for breakfast?', a: ['lunch and dinner', 'lunch', 'dinner'] },
+    { q: 'Before Mount Everest was discovered, which mountain was the tallest in the world?', a: ['everest', 'mount everest'] },
+    { q: 'Which is heavier, a kilogram of feathers or a kilogram of stones?', a: ['neither', 'same', 'the same', 'they weigh the same', 'both'] },
+    { q: 'A farmer had seventeen sheep and all but nine ran away. How many are left?', a: ['9', 'nine'] },
+    { q: 'How many times can you subtract five from twenty five?', a: ['once', 'one time', 'only once', '1'] }
+]);
+
+// ─── Rock-Paper-Scissors: the bot has already thrown ─────────────────────────
+export const RPS_HANDS = Object.freeze(['Rock', 'Paper', 'Scissors']);
+/** hand → the hand it beats. Paper beats Rock, Scissors beats Paper, Rock beats Scissors. */
+const RPS_BEATS = Object.freeze({ Rock: 'Scissors', Paper: 'Rock', Scissors: 'Paper' });
+
+/**
+ * "rock", "r", "✊" → 'Rock'; "paper", "p", "✋" → 'Paper';
+ * "scissors", "scissor", "s", "✌️" → 'Scissors'; anything else null.
+ */
+export function parseRpsCall(text) {
+    const s = String(text ?? '').trim().toLowerCase();
+    if (!s) return null;
+    if (/^(r|rock|✊)$/.test(s)) return 'Rock';
+    if (/^(p|paper|✋)$/.test(s)) return 'Paper';
+    if (/^(s|scissors|scissor|✌|✌️)$/.test(s)) return 'Scissors';
+    return null;
+}
+
 /** Winner points per game. A round can be lost, never the scoreboard. */
 export const GAME_POINTS = Object.freeze({
     number : 10,
-    coin   : 2,
+    riddle : 8,
+    rps    : 8,
     math   : 5,
     code   : 5,
     scramble: 5,
-    trivia : 5,
-    lucky  : 8
+    trivia : 5
 });
 
 export const PARTICIPATION_POINTS = 1;
@@ -192,10 +275,16 @@ export const GAMES = Object.freeze([
         blurb: 'A secret number, too-high/too-low hints, hot-and-cold feedback, 10 pts.'
     },
     {
-        name: 'coin', aliases: ['coin', 'flip', 'toss', 'heads'], emoji: '🪙', mode: 'race',
-        title: 'Coin toss', points: GAME_POINTS.coin,
-        how: '!game coin → say heads or tails',
-        blurb: 'A pre-flipped coin. Call it right for 2 pts.'
+        name: 'riddle', aliases: ['riddle', 'riddles', 'teaser', 'brain', 'brainteaser'], emoji: '🧩', mode: 'race',
+        title: 'Riddle', points: GAME_POINTS.riddle,
+        how: '!game riddle → send the answer',
+        blurb: 'A tricky brain teaser. First correct answer takes 8 pts.'
+    },
+    {
+        name: 'rps', aliases: ['rps', 'rock', 'roshambo', 'rpsbot'], emoji: '✊', mode: 'race',
+        title: 'Rock-Paper-Scissors', points: GAME_POINTS.rps,
+        how: '!game rps → call rock, paper or scissors',
+        blurb: 'The bot has already thrown. Beat its hand for 8 pts — two misses and it shows its hand.'
     },
     {
         name: 'math', aliases: ['math', 'maths', 'sum', 'calc'], emoji: '➗', mode: 'race',
@@ -220,12 +309,6 @@ export const GAMES = Object.freeze([
         title: 'Trivia', points: GAME_POINTS.trivia,
         how: '!game trivia → send the answer',
         blurb: 'General knowledge, plus the questions the owner contributed. 5 pts.'
-    },
-    {
-        name: 'lucky', aliases: ['lucky', 'draw', 'raffle', 'lottery', 'giveaway'], emoji: '🎁', mode: 'lucky',
-        title: 'Lucky draw', points: GAME_POINTS.lucky,
-        how: '!game lucky → !in to join → !game draw',
-        blurb: 'Random winner among everyone who joins. Joining alone earns a point.'
     }
 ]);
 
@@ -411,7 +494,8 @@ export function makeMath(level = 'easy', random = Math.random) {
 // ─── Engine ──────────────────────────────────────────────────────────────────
 const REVEAL = {
     number  : (r) => `the number was *${r.answer}*`,
-    coin    : (r) => `the coin was *${r.answer}*`,
+    riddle  : (r) => `the answer was *${r.accepted[0]}*`,
+    rps     : (r) => `the bot threw *${r.answer}*`,
     math    : (r) => `the answer was *${r.accepted ? r.accepted[0] : r.answer}*`,
     code    : (r) => `the answer was *${r.accepted[0]}*`,
     scramble: (r) => `the word was *${r.answer}*`,
@@ -634,12 +718,27 @@ export function createGameEngine({
                 };
             }
 
-            case 'coin': {
-                round.answer = random() < 0.5 ? 'Heads' : 'Tails';
+            case 'riddle': {
+                const entry = pickRiddle(ctx.jid);
+                if (!entry) return { error: 'The riddle pool is empty.' };
+                round.pool = entry;
+                round.accepted = entry.a;
+                lastRiddle.set(ctx.jid, { at: now(), value: entry.q });
                 return {
                     round,
-                    text: `${game.emoji} *Heads or tails?*\n\nThe coin is picked. What’s your call?\n`
-                        + `Say *heads* or *tails*. Right call = ${game.points} pts.` + tail
+                    text: `${game.emoji} *Riddle me this*\n${game.points} pts · First correct answer wins\n\n`
+                        + questionText(entry) + tail
+                };
+            }
+
+            case 'rps': {
+                round.answer = pickOne(RPS_HANDS, random);
+                return {
+                    round,
+                    text: `${game.emoji} *Rock · Paper · Scissors*\n${game.points} pts · Beat the bot to win\n\n`
+                        + 'The bot has already thrown its hand — in secret.\n'
+                        + 'Call *rock*, *paper* or *scissors*: only the hand that beats it wins.\n'
+                        + '_Two misses from one player and the hand is shown._' + tail
                 };
             }
 
@@ -720,17 +819,6 @@ export function createGameEngine({
                 };
             }
 
-            case 'lucky': {
-                round.drawAt = now() + Math.min(timeoutMs, 90_000);
-                round.endsAt = round.drawAt;
-                return {
-                    round,
-                    text: `${game.emoji} *You’re invited to a lucky draw*\n\nSend !in to join.\nDraw in ${Math.round((round.drawAt - now()) / 1000)}s.\n`
-                        + `Everyone who joins earns ${PARTICIPATION_POINTS} pt, and the random winner takes ${game.points} pts.\n`
-                        + '_!game draw picks the winner right now._'
-                };
-            }
-
             default:
                 return { error: 'Unknown game.' };
         }
@@ -741,6 +829,7 @@ export function createGameEngine({
         pf: 'programming fundamentals', oop: 'OOP', ds: 'Data structures', coal: 'COAL / assembly'
     };
     const lastQuestion = new Map();   // jid → { at, value }
+    const lastRiddle = new Map();     // jid → { at, value }
     const lastScramble = new Map();   // jid → { at, value }
 
     /** O(pool size), bounded; no immediate repeats even with a fixed RNG. */
@@ -763,6 +852,14 @@ export function createGameEngine({
         const pool = [...builtin, ...contributed, ...ai];
         const picked = pickDifferent(pool, lastQuestion.get(jid)?.value, 'q');
         if (picked && ai.includes(picked)) content?.markUsed?.('trivia', picked);
+        return picked;
+    }
+
+    function pickRiddle(jid) {
+        const ai = content?.items?.('riddle') || [];
+        const pool = [...RIDDLES, ...ai];
+        const picked = pickDifferent(pool, lastRiddle.get(jid)?.value, 'q') || RIDDLES[0];
+        if (ai.includes(picked)) content?.markUsed?.('riddle', picked);
         return picked;
     }
 
@@ -813,8 +910,9 @@ export function createGameEngine({
                     : `💡 It is in the upper half: *${mid + 1}–${round.max}*`;
             }
             case 'scramble': return `💡 It starts with *${String(round.answer)[0].toUpperCase()}*`;
+            case 'riddle':   return `💡 The answer starts with *${String(round.accepted[0])[0].toUpperCase()}*`;
+            case 'rps':      return '💡 Rock beats Scissors · Paper beats Rock · Scissors beats Paper';
             case 'trivia':   return `💡 The answer starts with *${String(round.accepted[0])[0].toUpperCase()}*`;
-            case 'coin':     return '💡 It begins with H or T, of course';
             case 'math':     return round.accepted
                 ? `💡 The answer starts with *${String(round.accepted[0])[0].toUpperCase()}*`
                 : `💡 The answer is ${round.answer % 2 === 0 ? 'even' : 'odd'}`;
@@ -936,24 +1034,23 @@ export function createGameEngine({
                 return { kind: 'wrong', reply: `${dir} · ${hotCold(n, round.answer, round.min, round.max)}` };
             }
 
-            case 'coin': {
-                const call = parseCoinCall(raw);
+            case 'rps': {
+                const call = parseRpsCall(raw);
                 if (call === null) {
-                    return explicit ? { kind: 'ignore', reason: 'Say *heads* or *tails*.' } : { kind: 'ignore' };
+                    return explicit ? { kind: 'ignore', reason: 'Call *rock*, *paper* or *scissors*.' } : { kind: 'ignore' };
                 }
-                const value = call ? 'Heads' : 'Tails';
-                if (entry.tried.has(value)) return { kind: 'repeat', value };
-                entry.tried.add(value);
+                if (RPS_BEATS[call] === round.answer) return { kind: 'win', points: GAME_POINTS.rps };
+                if (entry.tried.has(call)) return { kind: 'repeat', value: call };
+                entry.tried.add(call);
                 if (entry.tried.size >= 2) {
-                    // both calls are in — nothing is left to try, so the round
-                    // closes and the coin is revealed
+                    // two losing throws from one player — nothing left to hide,
+                    // so the round closes and the hand is revealed
                     return {
                         kind: 'wrong',
                         closing: true,
-                        reply: `🪙 Both calls are gone — it was *${round.answer}*.`
+                        reply: `✊ Two misses — the bot threw *${round.answer}*. Nobody beat it.`
                     };
                 }
-                if (value === round.answer) return { kind: 'win', points: GAME_POINTS.coin };
                 return { kind: 'wrong' };
             }
 
@@ -992,11 +1089,12 @@ export function createGameEngine({
                 return { kind: 'wrong' };
             }
 
-            case 'trivia': {
+            case 'trivia':
+            case 'riddle': {
                 if (answerMatches(raw, round.accepted)) {
                     const norm = normalizeAnswer(raw);
                     if (entry.tried.has(norm)) return { kind: 'repeat', value: raw };
-                    return { kind: 'win', points: GAME_POINTS.trivia };
+                    return { kind: 'win', points: round.name === 'riddle' ? GAME_POINTS.riddle : GAME_POINTS.trivia };
                 }
                 if (!explicit) return { kind: 'ignore' };          // plain chat, not an answer
                 const norm = normalizeAnswer(raw);
@@ -1048,43 +1146,6 @@ export function createGameEngine({
         return lines.filter(Boolean).join('\n');
     }
 
-    /** A lucky round's winner is drawn, never guessed. */
-    function drawLucky(jid, { manual = false } = {}) {
-        const round = rounds.get(jid);
-        if (!round || round.name !== 'lucky') return null;
-
-        const rows = [...round.players.values()];
-        if (!rows.length) {
-            return endRound(jid, {
-                reason: 'empty',
-                head: '🎁 Draw closed — nobody joined this time.'
-            });
-        }
-        const winner = pickOne(rows, random);
-        const label = winner.label;
-        const scored = scores?.win(jid, { ids: winner.ids, name: label }, GAME_POINTS.lucky) || { bonus: 0, streak: 1 };
-        const bonus = scored.bonus || 0;
-        const names = rows.map((r) => r.label);
-
-        // `earned` is what the winner actually collected: the joining point (if
-        // this round was their first within the cooldown window) plus the draw.
-        winner.earned += GAME_POINTS.lucky + bonus;
-
-        const text = [
-            `🎉 *Lucky pick: ${label}*`,
-            `${points(winner.earned)}${bonus ? ` _(+${bonus} streak bonus 🔥${scored.streak})_` : ''}`
-                + ` · ${rows.length} entr${rows.length === 1 ? 'y' : 'ies'}: ${names.join(', ')}`,
-            scored.player ? `Total: ${scored.player.points} pts` : null,
-            manual ? '_drawn early by request_' : null,
-            `Next round: \`!game lucky\` · scores: \`!game top\``
-        ].filter(Boolean).join('\n');
-
-        round.closed = true;
-        rounds.delete(jid);
-        cooldowns.set(jid, now() + cooldownMs);
-        return text;
-    }
-
     // ── owner controls and !game subcommands ─────────────────────────────────
     const gamesOff = () => ({
         handled: true, react: '🔕', reply: '🌙 Games are paused. The bot owner can reopen them with !game on.'
@@ -1099,6 +1160,7 @@ export function createGameEngine({
         rounds.clear();
         cooldowns.clear();
         lastQuestion.clear();
+        lastRiddle.clear();
         lastScramble.clear();
         if (send && cancelled.length) {
             // Sequential/async: do not hold up the owner's confirmation or
@@ -1170,7 +1232,7 @@ export function createGameEngine({
         if (sub === 'add' && String(args[1] || '').toLowerCase() === 'new') {
             if (!ctx.isOwner) return ownerOnly();
             const moduleName = String(args[2] || '').toLowerCase();
-            const aliases = { coal: ['code', 'coal'], pf: ['code', 'pf'], oop: ['code', 'oop'], ds: ['code', 'ds'], trivia: ['trivia', null], math: ['math', null], calculus: ['math', 'calculus'], mvc: ['math', 'mvc'], linear: ['math', 'linear'], scramble: ['scramble', null] };
+            const aliases = { coal: ['code', 'coal'], pf: ['code', 'pf'], oop: ['code', 'oop'], ds: ['code', 'ds'], trivia: ['trivia', null], riddle: ['riddle', null], math: ['math', null], calculus: ['math', 'calculus'], mvc: ['math', 'mvc'], linear: ['math', 'linear'], scramble: ['scramble', null] };
             const picked = aliases[moduleName];
             if (!picked) return { handled: true, react: '⚠️', reply: 'Try it like this: `!game add new coal|pf|oop|ds|trivia|math|scramble`' };
             try {
@@ -1284,19 +1346,6 @@ export function createGameEngine({
             };
         }
 
-        // With a draw already open, "!game lucky" means join it and
-        // "!game draw" means pick the winner now — both are what you would type.
-        const current = active(ctx.jid);
-        if (game.name === 'lucky' && current?.name === 'lucky') {
-            if (sub === 'draw') {
-                const text = drawLucky(ctx.jid, { manual: true });
-                return text
-                    ? { handled: true, react: '🎁', reply: text }
-                    : { handled: true, react: 'ℹ️', reply: 'No draw is open here.' };
-            }
-            return join(ctx);
-        }
-
         return start(ctx, game, args.slice(1));
     }
 
@@ -1311,7 +1360,6 @@ export function createGameEngine({
         const current = active(ctx.jid);
 
         if (current) {
-            if (current.name === game.name && game.name === 'lucky') return join(ctx);
             const mine = current.starterKey === key;
             if (!mine && !ctx.isOwner) {
                 return {
@@ -1341,11 +1389,6 @@ export function createGameEngine({
         // played (and earns the participation point) once they actually try.
         playerEntry(built.round, key, label, ctx.senderIds);
 
-        if (game.name === 'lucky') {
-            const injected = joinInternal(built.round, ctx, label);
-            return { handled: true, react: game.emoji, reply: `${built.text}\n\n🎟️ ${injected.reply}` };
-        }
-
         log?.info?.(`game: ${label} started ${game.name} in ${ctx.jid}`);
         return { handled: true, react: game.emoji, reply: built.text };
     }
@@ -1362,44 +1405,8 @@ export function createGameEngine({
                 reply: `⛔ Only ${round.starterLabel} (who started it) or the bot owner can stop this round.`
             };
         }
-        if (round.name === 'lucky') {
-            const text = drawLucky(ctx.jid) || 'No draw is open here.';
-            return { handled: true, react: '🎁', reply: text };
-        }
         const text = endRound(ctx.jid, { reason: 'stop' }) || 'No game is running here.';
         return { handled: true, react: '🛑', reply: text };
-    }
-
-    // ── joining (lucky draw) ─────────────────────────────────────────────────
-    function joinInternal(round, ctx, label) {
-        const key = keyOf(ctx);
-        const existing = round.players.get(key);
-        if (existing?.joined) return { ok: false, reply: `You’re already in, ${label}. ${round.players.size} players have joined.` };
-
-        const entry = playerEntry(round, key, label, idsOf(ctx));
-        rememberIds(ctx, key);
-        entry.joined = true;
-        touchParticipation(round, entry, ctx, label);   // sets `played` and credits the point
-
-        const seconds = Math.max(0, Math.round((round.endsAt - now()) / 1000));
-        return {
-            ok: true,
-            reply: `You’re in, ${label}! ${round.players.size} joined · Draw in ~${seconds}s (!game draw to pick now).`
-        };
-    }
-
-    async function join(ctx) {
-        if (!enabled) return gamesOff();
-        const round = active(ctx.jid);
-        if (round?.name !== 'lucky') {
-            return { handled: true, react: '⚠️', reply: '⚠️ No draw is open. Start one with *!game lucky*' };
-        }
-        const label = await labelOf(ctx);
-        if (!enabled || active(ctx.jid) !== round || round.closed) {
-            return enabled ? { handled: true, react: 'ℹ️', reply: 'The draw has ended.' } : gamesOff();
-        }
-        const out = joinInternal(round, ctx, label);
-        return { handled: true, react: out.ok ? '🎟️' : 'ℹ️', reply: out.reply };
     }
 
     // ── !guess and plain replies ─────────────────────────────────────────────
@@ -1437,17 +1444,16 @@ export function createGameEngine({
                         ? takeAttempt(ctx, text, false) : { handled: false };
                 }
                 return /^-?\d+$/.test(text) ? takeAttempt(ctx, text, false) : { handled: false };
-            case 'coin':
-                return parseCoinCall(text) !== null ? takeAttempt(ctx, text, false) : { handled: false };
+            case 'rps':
+                return parseRpsCall(text) !== null ? takeAttempt(ctx, text, false) : { handled: false };
             case 'scramble':
                 return /^[\p{L}]{3,24}$/u.test(text) ? takeAttempt(ctx, text, false) : { handled: false };
-            case 'trivia': {
+            case 'trivia':
+            case 'riddle': {
                 // Only a correct answer interrupts a conversation; wrong guesses
                 // are for people who used !guess.
                 return answerMatches(text, round.accepted) ? takeAttempt(ctx, text, false) : { handled: false };
             }
-            case 'lucky':
-                return /^(!?in|!?join|\+1|me too)$/i.test(text) ? join(ctx) : { handled: false };
             default:
                 return { handled: false };
         }
@@ -1922,12 +1928,7 @@ export function createGameEngine({
         for (const [jid, round] of [...rounds]) {
             if (active(jid) !== round || now() < round.endsAt) continue;
 
-            let text;
-            if (round.name === 'lucky') {
-                text = drawLucky(jid);
-            } else {
-                text = endRound(jid, { reason: 'timeout' });
-            }
+            const text = endRound(jid, { reason: 'timeout' });
             if (text) out.push({ chat: jid, game: round.name, text });
         }
         // Close ALL expired rounds before any slow WhatsApp send: a busy chat
@@ -1948,6 +1949,7 @@ export function createGameEngine({
         // The "don't repeat the last question" memory is per-chat too; let it
         // die with the silence it was protecting against.
         for (const [jid, e] of lastQuestion) if (now() - e.at >= repeatMemoryMs) lastQuestion.delete(jid);
+        for (const [jid, e] of lastRiddle) if (now() - e.at >= repeatMemoryMs) lastRiddle.delete(jid);
         for (const [jid, e] of lastScramble) if (now() - e.at >= repeatMemoryMs) lastScramble.delete(jid);
         for (const [stamp, e] of lastConcept) if (now() - e.at >= repeatMemoryMs) lastConcept.delete(stamp);
         return out;
@@ -1966,7 +1968,6 @@ export function createGameEngine({
     const api = {
         handle,
         guess,
-        join,
         handleMessage,
         addQuestion,
         stop: stopRound,

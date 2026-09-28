@@ -42,12 +42,12 @@ The media guard stays silent, including for view-once media.
 🎮 *Pick a game*
 
 🔢 *number* — A secret number, too-high/too-low hints, hot-and-cold feedback, 10 pts.
-🪙 *coin* — A pre-flipped coin. Call it right for 2 pts.
+🧩 *riddle* — A tricky brain teaser. First correct answer takes 8 pts.
+✊ *rps* — The bot has already thrown. Beat its hand for 8 pts — two misses and it shows its hand.
 ➗ *math* — Arithmetic plus linear algebra, calculus and multivariable calculus. 5 easy / 10 hard.
 💻 *code* — PF, OOP, data structures and COAL assembly/registers. 5 easy / 10 hard.
 🔤 *scramble* — Letters shuffled at random; first correct word takes 5 pts.
 🧠 *trivia* — General knowledge, plus the questions the owner contributed. 5 pts.
-🎁 *lucky* — Random winner among everyone who joins. Joining alone earns a point.
 
 Start with !game <name>
 Math/code: add easy or hard.
@@ -70,8 +70,10 @@ Wins earn game points; streaks can add a bonus.
 
 🔢 *number* · 10 pts
 !game number [1-100] → send a number
-🪙 *coin* · 2 pts
-!game coin → say heads or tails
+🧩 *riddle* · 8 pts
+!game riddle → send the answer
+✊ *rps* · 8 pts
+!game rps → call rock, paper or scissors
 ➗ *math* · 5 pts
 !game math [easy|hard] [linear|calc|mvc|arith] → send the answer
 💻 *code* · 5 pts
@@ -80,8 +82,6 @@ Wins earn game points; streaks can add a bonus.
 !game scramble → send the word
 🧠 *trivia* · 5 pts
 !game trivia → send the answer
-🎁 *lucky* · 8 pts
-!game lucky → !in to join → !game draw
 
 Math/code hard mode pays 10 pts. Number rewards fall with wrong guesses.
 Rounds end when time runs out. Wrong guesses may get hints.
@@ -91,7 +91,6 @@ Rounds end when time runs out. Wrong guesses may get hints.
 !guess <answer> — or just send your answer
 !game mode easy|hard — default math/code difficulty
 !game end — end your round
-!in — join a lucky draw · !game draw — draw now
 !game status — availability and question pools
 
 *Scores*
@@ -126,13 +125,27 @@ Up to 10 pts; each wrong guess reduces the reward by 1.
 !game end to end your round · !top for scores
 ````
 
-## coin round
+## riddle round
 
 ````text
-🪙 *Heads or tails?*
+🧩 *Riddle me this*
+8 pts · First correct answer wins
 
-The coin is picked. What’s your call?
-Say *heads* or *tails*. Right call = 2 pts.
+I speak without a mouth and hear without ears. I have no body, but I come alive with the wind. What am I?
+
+180s · Send your answer.
+!game end to end your round · !top for scores
+````
+
+## rps round
+
+````text
+✊ *Rock · Paper · Scissors*
+8 pts · Beat the bot to win
+
+The bot has already thrown its hand — in secret.
+Call *rock*, *paper* or *scissors*: only the hand that beats it wins.
+_Two misses from one player and the hand is shown._
 
 180s · Send your answer.
 !game end to end your round · !top for scores
@@ -172,19 +185,6 @@ What process lets plants make food from sunlight?
 
 180s · Send your answer.
 !game end to end your round · !top for scores
-````
-
-## lucky round
-
-````text
-🎁 *You’re invited to a lucky draw*
-
-Send !in to join.
-Draw in 90s.
-Everyone who joins earns 1 pt, and the random winner takes 8 pts.
-_!game draw picks the winner right now._
-
-🎟️ You’re in, Ali! 1 joined · Draw in ~90s (!game draw to pick now).
 ````
 
 ## Data-structure code snippet

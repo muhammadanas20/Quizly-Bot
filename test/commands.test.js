@@ -39,7 +39,7 @@ test('parseCommand: the game and randomness shortcuts are recognised', () => {
     assert.equal(parseCommand('!play').name, 'game');
     assert.equal(parseCommand('!guess 42').name, 'guess');
     assert.equal(parseCommand('!g 42').name, 'guess');
-    assert.equal(parseCommand('!in').name, 'join');
+    assert.equal(parseCommand('!in'), null, 'the lucky draw is gone');
     assert.equal(parseCommand('!top').name, 'top');
     assert.equal(parseCommand('!leaderboard').name, 'top');
     assert.equal(parseCommand('!random 1-10').name, 'random');
@@ -67,7 +67,7 @@ test('!help advertises the games, the score commands and the randomness', async 
 
 test('game commands answer politely when the games are switched off', async () => {
     const { handler, ctx } = world();          // this world has no game engine
-    for (const text of ['!game', '!guess 42', '!in', '!top']) {
+    for (const text of ['!game', '!guess 42', '!top']) {
         const out = await handler.handle(ctx(text));
         assert.equal(out.handled, true, text);
         assert.match(out.reply, /Games aren’t available/);

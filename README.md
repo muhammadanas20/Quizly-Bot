@@ -132,12 +132,12 @@ scoreboard every member contributes to:
 | Game | Start it with | How you win | Points |
 |---|---|---|---|
 | 🔢 `number` | `!game number [1-100]` | send numbers; too high / too low, hot-and-cold, and a narrowing hint after four misses | 10 − 1 per wrong guess |
-| 🪙 `coin` | `!game coin` | call heads or tails on a coin that is already in the air | 2 |
+| 🧩 `riddle` | `!game riddle` | first correct answer to a tricky brain teaser — built-in and rotating AI riddles | 8 |
+| ✊ `rps` | `!game rps` | the bot has secretly thrown; call the hand that beats it — rock, paper or scissors. Two misses from one player reveal the hand | 8 |
 | ➗ `math` | `!game math [easy\|hard] [linear\|calc\|mvc\|arith]` | arithmetic plus linear algebra (matrices, determinants, vector spaces, eigenvalues), calculus and multivariable calculus | 5 easy / 10 hard |
 | 💻 `code` | `!game code [easy\|hard] [pf\|oop\|ds\|coal]` | programming fundamentals, OOP, data structures, COAL (8086 assembly, registers, flags) | 5 easy / 10 hard |
 | 🔤 `scramble` | `!game scramble` | first correct answer to a shuffled word (some have clues) | 5 |
 | 🧠 `trivia` | `!game trivia` | first correct answer — built-in, member and rotating AI questions | 5 |
-| 🎁 `lucky` | `!game lucky` → `!in` → `!game draw` | a random entrant is drawn | 8 |
 
 **Everyone can play and everyone scores**
 
@@ -192,7 +192,7 @@ returns with `!game restore`.
 | Command | Effect |
 |---|---|
 | `!game on` | Allow members in every chat to start/play games; works even when `GAMES=off` in `.env` |
-| `!game stop` | Turn games off in every chat and cancel all open rounds (no lucky-draw payout); other active chats get a cancellation notice |
+| `!game stop` | Turn games off in every chat and cancel all open rounds without scoring them; other active chats get a cancellation notice |
 | `!game reset tops` | Clear **all** chat/global leaderboards and cancel open rounds; keep contributed questions and leave games on/off unchanged |
 | `!game reset @member` | Reset one member's points in this chat (`!game reset @member all` = every chat; a typed number works too) |
 | `!game end` | End only the current chat's round, without changing the global switch |
@@ -207,19 +207,19 @@ not the global game switch. Scores/owner settings survive restarts in
 math and code in that chat, and is saved. One round can override it:
 `!game math easy`, `!game code hard coal`.
 
-**Fresh AI questions, in small batches:** four pools are generated through your
+**Fresh AI questions, in small batches:** five pools are generated through your
 AI keys, one small request per category, 20 s apart, each batch starting on the
 next provider (groq → gemini → groq …) so no API gets a burst:
 
 | Pool | Every | What gets replaced |
 |---|---|---|
-| trivia, scramble | `GAME_AI_TRIVIA_HOURS` (5h) | the **whole** pool — but only if someone played one of its items; unplayed pools cost no quota |
+| trivia, riddle, scramble | `GAME_AI_TRIVIA_HOURS` (5h) | the **whole** pool — but only if someone played one of its items; unplayed pools cost no quota |
 | math, code | `GAME_AI_STUDY_HOURS` (10h) | **only the questions that were played**; unplayed ones stay |
 
 Failures keep the current pool and back off per category. Built-in questions
-(82 trivia, 116 words, 66 maths concept, 75 programming) and contributed questions
-are never removed by the rotation — but the owner can delete any trivia question
-at any time with `!game delete`. Groq generation uses `GROQ_TEXT_MODEL` (default
+(82 trivia, 63 riddles, 116 words, 66 maths concept, 75 programming) and
+contributed questions are never removed by the rotation — but the owner can
+delete any trivia question at any time with `!game delete`. Groq generation uses `GROQ_TEXT_MODEL` (default
 `openai/gpt-oss-120b`) because Groq retired the old llama-4-scout model.
 
 ### Instant randomness (no round, no scoreboard)
@@ -257,10 +257,9 @@ GAME_AI_CODE_COUNT=16
 |---|---|---|
 | `!quiz` | anyone | solve the attached / replied image right now |
 | `!game` | anyone | every game, plus the score and random commands |
-| `!game <name> [args]` | anyone | start a round: number, coin, math, code, scramble, trivia, lucky |
+| `!game <name> [args]` | anyone | start a round: number, riddle, rps, math, code, scramble, trivia |
 | `!game mode easy\|hard` | anyone | default math/code level for this chat |
 | `!guess <answer>` (`!g`) | anyone | take a shot in the running round |
-| `!in` | anyone | join a lucky draw |
 | `!top` (`!top all`) | anyone | leaderboard of this chat (or of every chat) |
 | `!game me` / `!game status` | anyone | your score card / current game status |
 | `!game end` | round starter / owner | end this chat's round early |

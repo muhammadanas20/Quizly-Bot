@@ -19,7 +19,6 @@ export const GAME_GUIDE = [
     '!guess <answer> — or just send your answer',
     '!game mode easy|hard — default math/code difficulty',
     '!game end — end your round',
-    '!in — join a lucky draw · !game draw — draw now',
     '!game status — availability and question pools', '',
     '*Scores*',
     '!top · !top all · !game me', '',
