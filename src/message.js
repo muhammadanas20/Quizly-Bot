@@ -129,6 +129,22 @@ export function isVisual(message) {
 }
 
 /**
+ * If this message is a reaction, return { emoji, targetId } else null.
+ * Baileys shape: message.reactionMessage = { key: { id, remoteJid, ... }, text: emoji }
+ * Empty text means removal.
+ */
+export function extractReaction(message) {
+    const m = message ? unwrap(message) : null;
+    const r = m?.reactionMessage;
+    if (!r) return null;
+    const emoji = String(r.text || '').trim();
+    // Even empty removal has a key — caller decides if empty matters
+    const targetId = r.key?.id || null;
+    const targetJid = r.key?.remoteJid || null;
+    return { emoji, targetId, targetJid, raw: r };
+}
+
+/**
  * Does the text ask for a quiz? Matches the trigger as a whole word so that
  * "quiz", "QUIZ", "quiz!" and "pls quiz" fire, but "quizzical" does not.
  */
