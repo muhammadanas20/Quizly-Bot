@@ -60,7 +60,12 @@ export async function startBot({
     flags.flush();
     const limiter  = createRateLimiter({ perMinute: config.ratePerMinute, perDay: config.ratePerDay });
     const inflight = createInflight();
-    setInterval(() => inflight.sweep(), 60_000).unref?.();
+    // Housekeeping for the two caches that would otherwise grow for the whole
+    // life of the process: wedged inflight solves and stale group-metadata
+    // entries (each one holds every member's display name). `groups` is
+    // created a few lines below, but the interval only ever fires after the
+    // synchronous setup has finished.
+    setInterval(() => { inflight.sweep(); groups.sweep(); }, 60_000).unref?.();
 
     let sock = null;
     let attempts = 0;

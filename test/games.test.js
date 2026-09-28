@@ -1165,3 +1165,25 @@ test('!game modify works while games are off, but stays owner-only', async () =>
     assert.equal(ok.react, '✏️');
     assert.deepEqual(scores.questions()[0].a, ['Saturn']);
 });
+
+test('the no-repeat memory works across rounds and dies after a day of silence', async () => {
+    const { games, tick } = world({ random: () => 0.5 });
+    const questionOf = (out) => out.reply.match(/❓ \*(.+?)\*/)[1];
+
+    const first = await games.handle(asAli('!game trivia'), ['trivia']);
+    let round = games.active(GROUP);
+    await games.guess(asAli('!guess ' + round.accepted[0]), [round.accepted[0]]);
+
+    tick(20_000);                                     // clear the between-round cooldown
+    const second = await games.handle(asAli('!game trivia'), ['trivia']);
+    round = games.active(GROUP);
+    await games.guess(asAli('!guess ' + round.accepted[0]), [round.accepted[0]]);
+
+    assert.notEqual(questionOf(second), questionOf(first), 'a back-to-back round must not repeat the last question');
+
+    tick(25 * 60 * 60 * 1000);                        // a full day of silence
+    await games.sweep();
+
+    const third = await games.handle(asAli('!game trivia'), ['trivia']);
+    assert.equal(questionOf(third), questionOf(first), 'the repeat memory has expired, so the old question may come back');
+});
