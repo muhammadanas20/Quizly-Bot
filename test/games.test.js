@@ -159,8 +159,9 @@ test('!game lists every game and the score commands', async () => {
 
     assert.equal(out.handled, true);
     for (const g of GAMES) assert.match(out.reply, new RegExp(`\\*${g.name}\\*`));
-    assert.match(out.reply, /!game top/);
-    assert.match(out.reply, /!game addq/);
+    assert.match(out.reply, /!top/);
+    assert.match(out.reply, /!game help/);
+    assert.match(games.help(), /!game addq/);
 });
 
 test('!game help explains each game, !game <unknown> says so', async () => {
@@ -168,7 +169,7 @@ test('!game help explains each game, !game <unknown> says so', async () => {
     assert.match((await games.handle(asAli('!game help'), ['help'])).reply, /How to play/);
 
     const bad = await games.handle(asAli('!game chess'), ['chess']);
-    assert.match(bad.reply, /do not know the game/);
+    assert.match(bad.reply, /isn’t on the list/);
     assert.equal(bad.react, '⚠️');
 });
 
@@ -177,7 +178,7 @@ test('!game number hints too high / too low and the right guess wins', async () 
     const { games, scores, tick } = world();          // secret number: 51
 
     const start = await games.handle(asAli('!game number 1-100'), ['number', '1-100']);
-    assert.match(start.reply, /between \*1\* and \*100\*/);
+    assert.match(start.reply, /from \*1\* to \*100\*/);
     assert.equal(games.active(GROUP).answer, 51);
 
     const low = await games.guess(asAli('!guess 30'), ['30']);
@@ -194,7 +195,7 @@ test('!game number hints too high / too low and the right guess wins', async () 
 
     const win = await games.guess(asAli('!guess 51'), ['51']);
     assert.equal(win.react, '🎉');
-    assert.match(win.reply, /Ali\* wins! the number was \*51\*/);
+    assert.match(win.reply, /Nice one, Ali!\*\nthe number was \*51\*/);
     assert.match(win.reply, /\*\+7\* pts/, '10 pts minus the 3 wrong guesses');
     assert.match(win.reply, /🎮 Ali \+8/, 'the win plus one participation point');
 
@@ -226,7 +227,7 @@ test('a repeated guess is refused instead of counted', async () => {
     await games.guess(asAli('!guess 30'), ['30']);
     const again = await games.guess(asAli('!guess 30'), ['30']);
     assert.equal(again.react, '♻️');
-    assert.match(again.reply, /already tried/);
+    assert.match(again.reply, /tried .* already/);
 });
 
 test('an out-of-range number is refused, and ordinary chat is not a guess', async () => {
@@ -251,7 +252,7 @@ test('the per-player guess cap stops one person hogging the round', async () => 
 
     const blocked = await games.guess(asAli('!guess 4'), ['4']);
     assert.equal(blocked.react, '🚫');
-    assert.match(blocked.reply, /let someone else try/i);
+    assert.match(blocked.reply, /used all 3 guesses/i);
 });
 
 test('a streak pays a bonus on the next win', async () => {
@@ -276,7 +277,7 @@ test('!game coin: a wrong call is a reaction, both calls end the round', async (
     assert.equal(wrong.reply, undefined, 'no chatter for a wrong coin call');
 
     const second = await games.guess(asSana('tails'), ['tails']);
-    assert.match(second.reply, /Sana\* wins/);
+    assert.match(second.reply, /Nice one, Sana!/);
 
     // the coin is revealed: the round is closed
     assert.equal(games.active(GROUP), null);
@@ -298,7 +299,7 @@ test('!game math hard awards ten points for a multi-step problem', async () => {
     const { games, scores } = world({ random: () => 0.7 });
     const start = await games.handle(asAli('!game math hard'), ['math', 'hard']);
     const round = games.active(GROUP);
-    assert.match(start.reply, /Maths\* \(hard\)/);
+    assert.match(start.reply, /Math · Arithmetic\*\nhard/);
     assert.match(round.problem.question, /÷/);
     const win = await games.guess(asAli(`!guess ${round.answer}`), [String(round.answer)]);
     assert.match(win.reply, /\*\+10\* pts/);
@@ -310,7 +311,7 @@ test('!game scramble: a plain single word is a guess', async () => {
     const start = await games.handle(asAli('!game scramble'), ['scramble']);
     const round = games.active(GROUP);
     assert.ok(WORDS.includes(round.answer), 'the word comes from the shipped list');
-    assert.match(start.reply, /🔀 \*/);
+    assert.match(start.reply, /\*[A-Z]+\*/);
     assert.deepEqual([...round.scrambled].sort(), [...round.answer].sort());
 
     const wrong = await games.handleMessage(asSana('banana'));
@@ -349,7 +350,7 @@ test('a member-contributed question can be drawn for a round', async () => {
     assert.match(round.pool.by, /Sana/);
 
     const win = await games.handleMessage(asSana('tokyo'));
-    assert.match(win.reply, /wins/);
+    assert.match(win.reply, /Nice one/);
 });
 
 test('trivia and scramble use the latest AI pool; an active round keeps its original answer', async () => {
@@ -388,11 +389,11 @@ test('!game addq needs a question and an answer, and refuses duplicates', async 
     const asOwner = (text, args) => games.handle(asAli(text, { isOwner: true }), args);
 
     const usage = await asOwner('!game addq no separator here', ['addq', 'no', 'separator', 'here']);
-    assert.match(usage.reply, /Usage: `?!game addq Question ; Answer/);
+    assert.match(usage.reply, /Try it like this: `?!game addq Question ; Answer/);
 
     const ok = await asOwner('!game addq Which planet has rings? ; Saturn/ringed', ['addq', 'Which', 'planet', 'has', 'rings?', ';', 'Saturn/ringed']);
     assert.equal(ok.react, '✅');
-    assert.match(ok.reply, /Added to the trivia pool/);
+    assert.match(ok.reply, /Question added/);
     assert.match(ok.reply, /\*\+2\* pts for contributing/, 'contributing scores too');
     assert.equal(scores.questionCount, 1);
     assert.deepEqual(scores.questions()[0].a, ['Saturn', 'ringed'], 'a / adds another accepted spelling');
@@ -431,7 +432,7 @@ test('only the owner may contribute a question with !game addq', async () => {
     );
     assert.equal(member.handled, true, 'the refusal still consumes the command');
     assert.equal(member.react, '⛔');
-    assert.match(member.reply, /Only the bot owner can use that command/);
+    assert.match(member.reply, /This command is for the bot owner/);
 
     assert.equal(scores.questionCount, 0, 'nothing reaches the pool');
     assert.equal(scores.playerOf(GROUP, [PN2])?.points ?? 0, 0, 'and nobody is paid for it');
@@ -456,7 +457,7 @@ test('a non-owner gets the same ⛔ for addq whether games are on or off', async
     const { games, tick, config } = world();
 
     const on = await games.handle(asSana('!game addq Q? ; A'), ['addq', 'Q?', ';', 'A']);
-    assert.match(on.reply, /Only the bot owner/);
+    assert.match(on.reply, /This command is for the bot owner/);
 
     await games.handle(asAli('!game stop', { isOwner: true }), ['stop']);
     assert.equal(games.enabled, false);
@@ -464,7 +465,7 @@ test('a non-owner gets the same ⛔ for addq whether games are on or off', async
 
     const off = await games.handle(asSana('!game addq Q? ; A'), ['addq', 'Q?', ';', 'A']);
     assert.equal(off.react, '⛔', 'the owner gate answers before the games switch');
-    assert.match(off.reply, /Only the bot owner/, 'not "Games are OFF"');
+    assert.match(off.reply, /This command is for the bot owner/, 'not "Games are OFF"');
 });
 
 // ── lucky draw ───────────────────────────────────────────────────────────────
@@ -472,14 +473,14 @@ test('!game lucky: joining earns a point, the draw picks one winner at random', 
     const { games, scores } = world();                  // RNG 0.5 → picks the second entry
 
     const start = await games.handle(asAli('!game lucky'), ['lucky']);
-    assert.match(start.reply, /Lucky draw/);
-    assert.match(start.reply, /Ali is in!/, 'the starter joins automatically');
+    assert.match(start.reply, /lucky draw/);
+    assert.match(start.reply, /You’re in, Ali!/, 'the starter joins automatically');
 
     const joined = await games.join(asSana('!in'));
-    assert.match(joined.reply, /Sana is in! 2 joined/);
+    assert.match(joined.reply, /You’re in, Sana! 2 joined/);
 
     const again = await games.handle(asAli('!game lucky'), ['lucky']);
-    assert.match(again.reply, /already in the draw/);
+    assert.match(again.reply, /already in,/);
     assert.equal(games.active(GROUP).players.size, 2);
 
     const chat = await games.handleMessage(asSana('hello everyone'));
@@ -487,7 +488,7 @@ test('!game lucky: joining earns a point, the draw picks one winner at random', 
 
     const drawn = await games.handle(asSana('!game draw'), ['draw']);
     assert.equal(drawn.react, '🎁');
-    assert.match(drawn.reply, /Sana\* wins the lucky draw/);
+    assert.match(drawn.reply, /Lucky pick: Sana/);
     assert.match(drawn.reply, /\*\+9\*/, '8 for the win + 1 for joining');
     assert.equal(games.active(GROUP), null);
 
@@ -510,7 +511,7 @@ test('a draw nobody joined closes without a winner', async () => {
     lonely.active(GROUP).players.clear();
 
     const out = await lonely.handle(asAli('!game draw'), ['draw']);
-    assert.match(out.reply, /Nobody joined/);
+    assert.match(out.reply, /nobody joined/);
 });
 
 // ── control: stop, replace, cooldown, timeout ────────────────────────────────
@@ -548,7 +549,7 @@ test('a stranger cannot replace a running round, the starter can', async () => {
     assert.equal(games.active(GROUP).name, 'number');
 
     const replaced = await games.handle(asAli('!game coin'), ['coin']);
-    assert.match(replaced.reply, /Coin toss/);
+    assert.match(replaced.reply, /Heads or tails/);
     assert.equal(games.active(GROUP).name, 'coin');
 });
 
@@ -559,11 +560,11 @@ test('a new round waits out the cooldown after the last one', async () => {
 
     const tooSoon = await games.handle(asAli('!game coin'), ['coin']);
     assert.equal(tooSoon.react, '⏳');
-    assert.match(tooSoon.reply, /breather/);
+    assert.match(tooSoon.reply, /Next round in/);
 
     tick(config.gameCooldownMs + 1000);
     const ok = await games.handle(asAli('!game coin'), ['coin']);
-    assert.match(ok.reply, /Coin toss/);
+    assert.match(ok.reply, /Heads or tails/);
 });
 
 test('a round that times out is revealed to the group through send()', async () => {
@@ -575,7 +576,7 @@ test('a round that times out is revealed to the group through send()', async () 
     const out = await games.sweep();
 
     assert.equal(out.length, 1);
-    assert.match(out[0].text, /No winner this time — the number was \*51\*/);
+    assert.match(out[0].text, /Time’s up\*\nthe number was \*51\*/);
     assert.deepEqual(sent, [{ jid: GROUP, text: out[0].text }], 'the group is told, once');
     assert.equal(games.active(GROUP), null);
 
@@ -594,19 +595,19 @@ test('!top, !top all and !game me report the board', async () => {
     await games.guess(asSana('!guess 51'), ['51']);
 
     const top = await games.board(asAli('!top'), '');
-    assert.match(top, /Top players — Test Group/);
+    assert.match(top, /Leaderboard · Test Group/);
     assert.match(top, /Ali/);
     assert.match(top, /2 players/);
 
     const all = await games.board(asAli('!top all'), 'all');
-    assert.match(all, /all chats/);
+    assert.match(all, /All chats/);
 
     const me = await games.handle(asSana('!game me'), ['me']);
-    assert.match(me.reply, /👤 \*Sana\*/);
+    assert.match(me.reply, /👤 \*Sana’s score\*/);
     assert.match(me.reply, /Rank #/);
 
     const fresh = await games.handle(ctx('!game me', { ids: ['999@lid'], name: 'Nobody' }), ['me']);
-    assert.match(fresh.reply, /not on the board yet/);
+    assert.match(fresh.reply, /score starts with your first guess/);
 });
 
 test('two identities of one member share a single scoreboard row', async () => {
@@ -650,20 +651,20 @@ test('!game stop by the owner cancels ALL chats without drawing winners, and !ga
 
     const stopped = await games.handle(asAli('!game stop', { isOwner: true }), ['stop']);
     assert.equal(stopped.react, '🛑');
-    assert.match(stopped.reply, /2 active round\(s\) cancelled/);
+    assert.match(stopped.reply, /2 rounds cancelled/);
     assert.equal(games.roundCount, 0);
     assert.equal(games.enabled, false);
     assert.equal(scores.playerOf(OTHER, [PN2]).wins, 0, 'no lucky winner on cancellation');
     assert.deepEqual(sent.map((s) => s.jid), [OTHER], 'other groups are notified once');
     assert.match(sent[0].text, /cancelled/);
 
-    assert.match((await games.handle(asSana('!game number'), ['number'])).reply, /Games are OFF/);
-    assert.match((await games.guess(asSana('!guess 51'), ['51'])).reply, /Games are OFF/);
-    assert.match((await games.join(asSana('!in'))).reply, /Games are OFF/);
+    assert.match((await games.handle(asSana('!game number'), ['number'])).reply, /Games are OFF|Games are paused/);
+    assert.match((await games.guess(asSana('!guess 51'), ['51'])).reply, /Games are OFF|Games are paused/);
+    assert.match((await games.join(asSana('!in'))).reply, /Games are OFF|Games are paused/);
     // addq is owner-only, so the owner gate answers before the games switch…
-    assert.match((await games.handle(asSana('!game addq A question? ; An answer'), ['addq', 'A question?', ';', 'An answer'])).reply, /Only the bot owner/);
+    assert.match((await games.handle(asSana('!game addq A question? ; An answer'), ['addq', 'A question?', ';', 'An answer'])).reply, /This command is for the bot owner/);
     // …while the owner still hears that games are off.
-    assert.match((await games.handle(asAli('!game addq A question? ; An answer', { isOwner: true }), ['addq', 'A question?', ';', 'An answer'])).reply, /Games are OFF/);
+    assert.match((await games.handle(asAli('!game addq A question? ; An answer', { isOwner: true }), ['addq', 'A question?', ';', 'An answer'])).reply, /Games are OFF|Games are paused/);
     assert.deepEqual(await games.handleMessage(asSana('51')), { handled: false });
     assert.match((await games.handle(asSana('!game status'), ['status'])).reply, /Games: \*OFF\*/);
     assert.match(games.board(asSana('!top', { jid: OTHER })), /Sana/, 'existing board remains readable');
@@ -672,7 +673,7 @@ test('!game stop by the owner cancels ALL chats without drawing winners, and !ga
     assert.equal(disk.gamesEnabled(true), false, 'switch survives a restart');
     assert.equal((await games.handle(asAli('!game on', { isOwner: true }), ['on'])).react, '✅');
     assert.equal(games.enabled, true);
-    assert.match((await games.handle(asSana('!game coin'), ['coin'])).reply, /Coin toss/);
+    assert.match((await games.handle(asSana('!game coin'), ['coin'])).reply, /Heads or tails/);
 });
 
 test('!game reset tops clears all leaderboards but keeps questions and game settings', async () => {
@@ -686,7 +687,7 @@ test('!game reset tops clears all leaderboards but keeps questions and game sett
     const denied = await games.handle(asSana('!game reset tops'), ['reset', 'tops']);
     assert.equal(denied.react, '⛔');
     assert.equal(scores.boardAll().length, 2);
-    assert.match((await games.handle(asAli('!game reset', { isOwner: true }), ['reset'])).reply, /Usage/);
+    assert.match((await games.handle(asAli('!game reset', { isOwner: true }), ['reset'])).reply, /Try it like this/);
     assert.equal(scores.boardAll().length, 2);
 
     const reset = await games.handle(asAli('!game reset tops', { isOwner: true }), ['reset', 'tops']);
@@ -708,7 +709,7 @@ test('!game reset tops clears all leaderboards but keeps questions and game sett
 test('GAMES=off is an initial setting: owner can enable it and the override persists', async () => {
     const { games, scores, config, dir } = world({ env: { GAMES: 'off' } });
     assert.equal(games.enabled, false);
-    assert.match((await games.handle(asSana('!game number'), ['number'])).reply, /Games are OFF/);
+    assert.match((await games.handle(asSana('!game number'), ['number'])).reply, /Games are OFF|Games are paused/);
     assert.equal((await games.handle(asSana('!game on'), ['on'])).react, '⛔');
     await games.handle(asAli('!game on', { isOwner: true }), ['on']);
     assert.equal(games.enabled, true);
@@ -730,7 +731,7 @@ test('a pending start or guess cannot award points after a global stop/reset', a
     await Promise.resolve();
     await games.handle(asSana('!game stop', { isOwner: true }), ['stop']);
     release();
-    assert.match((await starting).reply, /Games are OFF/);
+    assert.match((await starting).reply, /Games are OFF|Games are paused/);
     assert.equal(games.roundCount, 0);
 
     await games.handle(asSana('!game on', { isOwner: true }), ['on']);
@@ -788,7 +789,7 @@ test('!game math linear asks a linear-algebra question and a correct answer wins
     const round = games.active(GROUP);
     assert.equal(round.pool.topic, 'linear');
     assert.equal(round.pool.level, 'hard');
-    assert.match(start.reply, /hard · linear algebra/);
+    assert.match(start.reply, /linear algebra\*\nhard/);
     assert.deepEqual(await games.handleMessage(asSana('lol what')), { handled: false }, 'chat is ignored');
     const win = await games.handleMessage(asAli(round.accepted[0]));
     assert.equal(win.react, '🎉');
@@ -801,7 +802,7 @@ test('!game code: programming questions by topic, easy by default', async () => 
     const round = games.active(GROUP);
     assert.equal(round.pool.topic, 'coal');
     assert.equal(round.pool.level, 'easy');
-    assert.match(start.reply, /Programming\* \(easy · COAL/);
+    assert.match(start.reply, /COAL.* · Easy/);
     const miss = await games.guess(asSana('!guess banana'), ['banana']);
     assert.equal(miss.react, '❌');
     const win = await games.guess(asAli(`!guess ${round.accepted[0]}`), [round.accepted[0]]);
@@ -844,7 +845,7 @@ test('!game reset @member: owner only, clears one member in this chat (or all ch
 
     const denied = await games.handle(asSana('!game reset @Sana', mention), ['reset', '@Sana']);
     assert.equal(denied.react, '⛔');
-    assert.match((await games.handle(asAli('!game reset', { isOwner: true }), ['reset'])).reply, /Usage/);
+    assert.match((await games.handle(asAli('!game reset', { isOwner: true }), ['reset'])).reply, /Try it like this/);
 
     const out = await games.handle({ ...asAli('!game reset @Sana', { isOwner: true }), ...mention }, ['reset', '@Sana']);
     assert.equal(out.react, '✅');
@@ -869,7 +870,7 @@ test('!game delete removes an added question by number, owner only', async () =>
 
     const member = await games.handle(asSana('!game delete 1'), ['delete', '1']);
     assert.equal(member.react, '⛔');
-    assert.match(member.reply, /Only the bot owner/);
+    assert.match(member.reply, /This command is for the bot owner/);
     assert.equal(scores.questionCount, 2, 'a member deletes nothing');
 
     for (const alias of ['del', 'delq', 'removeq']) {
@@ -890,7 +891,7 @@ test('!game delete removes an added question by number, owner only', async () =>
     assert.equal(scores.questions()[0].q, 'What instrument measures air pressure?');
 
     const usage = await games.handle(asAli('!game delete', { isOwner: true }), ['delete']);
-    assert.match(usage.reply, /Usage: `?!game delete/);
+    assert.match(usage.reply, /Try it like this: `?!game delete/);
 });
 
 test('!game delete by text removes the exact question from any pool', async () => {
@@ -994,12 +995,12 @@ test('!game listq numbers added questions and searches every pool, owner only', 
     assert.equal(denied.react, '⛔');
 
     const empty = await games.handle(asAli('!game listq', { isOwner: true }), ['listq']);
-    assert.match(empty.reply, /No added trivia questions yet/);
+    assert.match(empty.reply, /No added questions yet/);
     assert.match(empty.reply, /Pool:/);
 
     scores.addQuestion({ q: 'Which city is the capital of Japan?', a: ['Tokyo'] });
     const list = await games.handle(asAli('!game listq', { isOwner: true }), ['listq']);
-    assert.match(list.reply, /Added trivia \(1\)/);
+    assert.match(list.reply, /Your questions · 1/);
     assert.match(list.reply, /1\. Which city is the capital of Japan\?/);
     assert.match(list.reply, /1 added · 1 AI/);
 
@@ -1025,7 +1026,7 @@ test('delete/listq/restore work while games are off, but stay owner-only', async
     }
 
     const list = await games.handle(asAli('!game listq', { isOwner: true }), ['listq']);
-    assert.match(list.reply, /Added trivia \(1\)/);
+    assert.match(list.reply, /Your questions · 1/);
 
     const del = await games.handle(asAli('!game delete 1', { isOwner: true }), ['delete', '1']);
     assert.equal(del.react, '🗑️');
@@ -1039,7 +1040,7 @@ test('!game modify changes an added answer by number, owner only', async () => {
 
     const member = await games.handle(asSana('!game modify 1 ; Saturn'), ['modify', '1', ';', 'Saturn']);
     assert.equal(member.react, '⛔');
-    assert.match(member.reply, /Only the bot owner/);
+    assert.match(member.reply, /This command is for the bot owner/);
     assert.deepEqual(scores.questions()[0].a, ['Jupiter'], 'a member modifies nothing');
 
     for (const alias of ['mod', 'edit', 'update']) {
@@ -1048,7 +1049,7 @@ test('!game modify changes an added answer by number, owner only', async () => {
     }
 
     const usage = await games.handle(asAli('!game modify 1 Saturn', { isOwner: true }), ['modify', '1', 'Saturn']);
-    assert.match(usage.reply, /Usage: `?!game modify/);
+    assert.match(usage.reply, /Try it like this: `?!game modify/);
 
     const bad = await games.handle(asAli('!game modify 5 ; Saturn', { isOwner: true }), ['modify', '5', ';', 'Saturn']);
     assert.equal(bad.react, '⚠️');
@@ -1168,7 +1169,7 @@ test('!game modify works while games are off, but stays owner-only', async () =>
 
 test('the no-repeat memory works across rounds and dies after a day of silence', async () => {
     const { games, tick } = world({ random: () => 0.5 });
-    const questionOf = (out) => out.reply.match(/❓ \*(.+?)\*/)[1];
+    const questionOf = (out) => out.reply.split('\n\n')[1].split('\n')[0];
 
     const first = await games.handle(asAli('!game trivia'), ['trivia']);
     let round = games.active(GROUP);
@@ -1186,4 +1187,36 @@ test('the no-repeat memory works across rounds and dies after a day of silence',
 
     const third = await games.handle(asAli('!game trivia'), ['trivia']);
     assert.equal(questionOf(third), questionOf(first), 'the repeat memory has expired, so the old question may come back');
+});
+
+test('new DS snippet questions render and score correctly in real easy/hard rounds', async () => {
+    const { CODE_BANK } = await import('../src/banks.js');
+    for (const level of ['easy', 'hard']) {
+        const pool = CODE_BANK.filter((q) => q.topic === 'ds' && q.level === level);
+        const index = pool.findIndex((q) => q.code);
+        assert.ok(index >= 0);
+        const { games, scores } = world({ random: () => (index + 0.1) / pool.length });
+        const start = await games.handle(asAli(`!game code ${level} ds`), ['code', level, 'ds']);
+        const round = games.active(GROUP);
+        assert.equal(round.pool, pool[index]);
+        assert.match(start.reply, /💻 \*Data structures · (Easy|Hard)\*/);
+        assert.ok(start.reply.includes(`\n\n\`\`\`\n${round.pool.code}\n\`\`\``));
+        assert.ok(!start.reply.includes('Answer:'));
+        const win = await games.guess(asAli(`!guess ${round.accepted[0]}`), [round.accepted[0]]);
+        assert.equal(win.react, '🎉');
+        const expected = (level === 'easy' ? 5 : 10) + 1;
+        assert.equal(scores.playerOf(GROUP, [PN]).points, expected);
+        assert.match(win.reply, new RegExp(`Total: ${expected} pts`));
+        assert.equal(games.active(GROUP), null);
+        games.close();
+    }
+});
+
+test('manual round endings do not pretend the timer expired', async () => {
+    const { games } = world();
+    await games.handle(asAli('!game number'), ['number']);
+    const end = await games.handle(asAli('!game end'), ['end']);
+    assert.match(end.reply, /Round ended/);
+    assert.doesNotMatch(end.reply, /Time’s up/);
+    assert.match(end.reply, /51/);
 });

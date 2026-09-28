@@ -306,17 +306,17 @@ function answerKeyLine(q) {
 /**
  * @returns {string|null} null when there is nothing usable to send
  */
-export function renderQuiz({ questions, unreadable = [], provider, model, ms, truncated = false }) {
+export function renderQuiz({ questions, unreadable = [], truncated = false }) {
     if (!questions?.length) return null;
 
     // One section per question so the layout is always
     //   question / one-line reason / answer  — repeated in order.
-    const sections = [`*Quiz solved* · ${questions.length} question${questions.length === 1 ? '' : 's'}`];
+    const sections = [`📝 *Quiz answers · ${questions.length} question${questions.length === 1 ? '' : 's'}*`];
 
     for (const q of questions) {
         const block = [`*Q${q.n}.* ${q.question || '_(question text not readable)_'}`];
-        if (q.reason) block.push(`💡 ${q.reason}`);
-        block.push(`✅ *${q.answer || '— could not determine —'}*`);
+        if (q.reason) block.push(q.reason);
+        block.push(q.answer ? `✅ *${q.answer}*` : '⚠️ Could not determine the answer.');
         sections.push(block.join('\n'));
     }
 
@@ -325,15 +325,10 @@ export function renderQuiz({ questions, unreadable = [], provider, model, ms, tr
     }
 
     if (truncated) {
-        sections.push('⚠️ _The answer hit the model output limit — later questions may be missing._');
+        sections.push('⚠️ Some answers may be missing (output limit). Send the remaining questions in a smaller screenshot.');
     }
 
-    sections.push(`━━ *Answer key* ━━\n${questions.map(answerKeyLine).join('\n')}`);
-
-    const meta = [provider, model, typeof ms === 'number' ? `${(ms / 1000).toFixed(1)}s` : null]
-        .filter(Boolean)
-        .join(' · ');
-    if (meta) sections.push(`_${meta}_`);
+    sections.push(`*Answer key*\n${questions.map(answerKeyLine).join('\n')}`);
 
     return sections.join('\n\n');
 }

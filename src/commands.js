@@ -27,7 +27,7 @@ export const PREFIX = '!';
 export const OWNER_ONLY = new Set(['flag', 'unflag', 'flags', 'guard']);
 
 /** Answer used when GAMES=off, so a game command never goes unanswered. */
-const NO_GAMES = { handled: true, react: '⚠️', reply: '⚠️ Games are not enabled on this bot.' };
+const NO_GAMES = { handled: true, react: '⚠️', reply: '🌙 Games aren’t available on this bot right now.' };
 
 const ALIASES = {
     unflag  : ['unflag', 'removeflag', 'pardon'],
@@ -76,57 +76,28 @@ export function parseCommand(text) {
 }
 
 export const HELP_TEXT = [
-    '*Quizly Bot*',
-    '',
-    `Send a message containing *${'{TRIGGER}'}* together with a screenshot of the quiz and the bot answers every question in order: question → one-line reason → answer.`,
-    '',
-    '*Games — everyone can play*',
-    '```',
-    `${PREFIX}game                   every game + the commands`,
-    `${PREFIX}game <name>            start a round (number, coin, math, code,`,
-    '                       scramble, trivia, lucky)',
-    `${PREFIX}game math hard linear   maths: linear algebra / calc / mvc`,
-    `${PREFIX}game code easy coal     programming: pf / oop / ds / coal`,
-    `${PREFIX}game mode easy|hard    default level for math + code here`,
-    `${PREFIX}guess <answer>         take a shot (!g works too)`,
-    `${PREFIX}in                     join a lucky draw`,
-    `${PREFIX}top                    leaderboard of this chat (${PREFIX}top all = global)`,
-    `${PREFIX}game me                your own score card`,
-    `${PREFIX}game end               starter: end this chat’s round`,
-    `${PREFIX}game status            games on/off + daily content`,
-    `${PREFIX}game addq Q ; A        add a trivia question (owner only)`,
-    `${PREFIX}game delete Q|#        delete a trivia question (owner only)`,
-    `${PREFIX}game modify Q ; A      fix a trivia answer (owner only)`,
-    `${PREFIX}game listq [search]    list added trivia / search all (owner only)`,
-    `${PREFIX}game answer           reveal current question answer (owner only)`,
-    `${PREFIX}game add new coal     generate + add questions (owner only; pf/oop/ds/trivia/math/scramble)`,
-    '```',
-    '*Random*',
-    '```',
-    `${PREFIX}random [n | 1-100 | a, b]   random number or pick`,
-    `${PREFIX}roll [2d6]  ${PREFIX}flip  ${PREFIX}pick a, b  ${PREFIX}shuffle a, b  ${PREFIX}8ball q`,
-    '```',
+    '👋 *Hey, welcome to Quizly*', '',
+    'Solve a screenshot, play a round, or settle a random pick.', '',
     '*Quiz*',
-    '```',
-    `${PREFIX}quiz                 solve the attached / replied image now`,
-    `${PREFIX}ping  ${PREFIX}stats        latency · deletes, AI usage, memory`,
-    '```',
-    '*Owner only*',
-    '```',
-    `${PREFIX}flag <@person> [why]   remove their stickers and photos (default)`,
-    `${PREFIX}flag <@person> media=sticker,image`,
-    'One-time (view-once) media counts as media too and is removed, even when WhatsApp keeps the bytes from this device.',
-    'Configure GUARD_MEDIA for other media types.',
-    `${PREFIX}unflag <@person>       remove a flag`,
-    `${PREFIX}flags                  list flagged members`,
-    `${PREFIX}guard on|off|status    toggle the media guard`,
-    `${PREFIX}game on                open all games for members`,
-    `${PREFIX}game stop              stop every active game and turn games off`,
-    `${PREFIX}game reset tops        reset ALL leaderboards (keeps questions)`,
-    `${PREFIX}game reset @member     reset one member's points here (add "all" = every chat)`,
-    '```',
-    '',
-    'The guard never replies in the group — flagged stickers and photos just disappear.'
+    'Send a screenshot with “{TRIGGER}”, or reply to one with !quiz.', '',
+    '*Play*',
+    '!game — browse games',
+    '!game code easy ds — data structures',
+    '!game math hard linear — linear algebra',
+    '!top — this chat’s leaderboard',
+    '!game me — your score', '',
+    '*Quick picks*',
+    '!random · !roll · !flip',
+    '!pick tea, coffee · !shuffle a, b · !8ball will I pass?', '',
+    '*More*',
+    '!game help — rules and game commands',
+    '!ping · !stats', '',
+    '*Owner tools*',
+    '!flag @member [reason] · !unflag @member · !flags',
+    '!flag @member media=sticker,image',
+    '!guard on|off|status',
+    'Game controls and question tools: !game help', '',
+    'The media guard stays silent, including for view-once media.'
 ].join('\n');
 
 export function createCommandHandler({ config, flags, log, guard, limiter, groups, games, randomTools, scores, solveNow, startedAt }) {
@@ -193,7 +164,7 @@ export function createCommandHandler({ config, flags, log, guard, limiter, group
         if (!cmd) return { handled: false };
 
         if (OWNER_ONLY.has(cmd.name) && !ctx.isOwner) {
-            return { handled: true, react: '⛔', reply: '⛔ Only the bot owner can use that command.' };
+            return { handled: true, react: '⛔', reply: '🔒 This command is for the bot owner.' };
         }
 
         switch (cmd.name) {
@@ -202,7 +173,7 @@ export function createCommandHandler({ config, flags, log, guard, limiter, group
 
             case 'ping': {
                 const mem = Math.round(process.memoryUsage().rss / 1048576);
-                return { handled: true, reply: `🏓 pong · ${mem} MB RSS · up ${uptime()}` };
+                return { handled: true, reply: `🏓 Here!\nUptime: ${uptime()} · Memory: ${mem} MB` };
             }
 
             case 'stats': {
@@ -212,19 +183,21 @@ export function createCommandHandler({ config, flags, log, guard, limiter, group
                 return {
                     handled: true,
                     reply: [
-                        '*Bot stats*',
+                        '📊 *Quizly stats*', '', '*Media guard*',
                         `Guard: ${config.guardEnabled ? 'ON' : 'OFF'} · media: ${config.guardMedia.join(', ')}`,
                         `Removed this session: ${guard.stats.deleted}` +
                             (guard.stats.viewOnce ? ` · of which one-time media: ${guard.stats.viewOnce}` : '') +
                             (guard.stats.skippedNotAdmin ? ` · skipped (bot not admin): ${guard.stats.skippedNotAdmin}` : ''),
                         `Flagged members: ${flags.count}`,
+                        '', '*Quiz usage*',
                         `AI calls: ${rate.minute}/${rate.perMinute} this minute · ${rate.day}/${rate.perDay} today`,
-                        top.length ? `Top offenders: ${top.map(([n, c]) => `${n} (${c})`).join(', ')}` : null,
+                        top.length ? `Most filtered: ${top.map(([n, c]) => `${n} (${c})`).join(', ')}` : null,
                         games
                             ? `Games: ${games.enabled ? 'ON' : 'OFF'} · ${scores?.playerCount ?? 0} player(s) on the board · ${scores?.questionCount ?? 0} member trivia question(s)`
                             : 'Games: OFF',
+                        '', '*System*',
                         `Memory: ${mem} MB · uptime ${uptime()}`
-                    ].filter(Boolean).join('\n')
+                    ].filter((line) => line !== null).join('\n')
                 };
             }
 
@@ -238,7 +211,7 @@ export function createCommandHandler({ config, flags, log, guard, limiter, group
                 }
                 return {
                     handled: true,
-                    reply: rows.length ? `*Flagged members (${rows.length})*\n${rows.join('\n')}` : 'Nobody is flagged.'
+                    reply: rows.length ? `🛡️ *Filtered members · ${rows.length}*\n${rows.join('\n')}` : '🛡️ No members have a media filter.'
                 };
             }
 
@@ -250,7 +223,7 @@ export function createCommandHandler({ config, flags, log, guard, limiter, group
                     expand           : ctx.expandIds
                 });
                 if (!targets.length) {
-                    return { handled: true, react: '⚠️', reply: `Usage: ${PREFIX}flag <@person or number> [reason]` };
+                    return { handled: true, react: '⚠️', reply: `Try it like this: ${PREFIX}flag <@person or number> [reason]` };
                 }
                 // "media=sticker,image" overrides the global GUARD_MEDIA for this person
                 const mediaArg = cmd.args.find((a) => /^media=/i.test(a));
@@ -281,7 +254,7 @@ export function createCommandHandler({ config, flags, log, guard, limiter, group
                 return {
                     handled: true,
                     react  : '🚩',
-                    reply  : `🚩 Flagged ${done.join(', ')}.\nTheir ${applies} will be removed silently in groups where the bot is admin.`
+                    reply  : `🛡️ *Media filter added*\n${done.join(', ')}\nTheir ${applies} will be removed silently in groups where the bot is admin.`
                 };
             }
 
@@ -293,7 +266,7 @@ export function createCommandHandler({ config, flags, log, guard, limiter, group
                     expand           : ctx.expandIds
                 });
                 if (!targets.length) {
-                    return { handled: true, react: '⚠️', reply: `Usage: ${PREFIX}unflag <@person or number>` };
+                    return { handled: true, react: '⚠️', reply: `Try it like this: ${PREFIX}unflag <@person or number>` };
                 }
                 const done = [];
                 const missed = [];
@@ -306,9 +279,9 @@ export function createCommandHandler({ config, flags, log, guard, limiter, group
                     // a partial removal is still a change worth confirming
                     react: done.length ? '✅' : 'ℹ️',
                     reply: [
-                        done.length ? `✅ Unflagged ${done.join(', ')}.` : null,
-                        missed.length ? `ℹ️ Not flagged: ${missed.join(', ')}.` : null
-                    ].filter(Boolean).join('\n')
+                        done.length ? `✅ Media filter removed for ${done.join(', ')}.` : null,
+                        missed.length ? `No media filter for: ${missed.join(', ')}.` : null
+                    ].filter((line) => line !== null).join('\n')
                 };
             }
 
@@ -318,17 +291,17 @@ export function createCommandHandler({ config, flags, log, guard, limiter, group
                     return {
                         handled: true,
                         react  : '📊',
-                        reply  : `Guard is ${config.guardEnabled ? 'ON' : 'OFF'} · removing: ${config.guardMedia.join(', ')} · ${flags.count} flagged`
+                        reply  : `🛡️ Media guard is ${config.guardEnabled ? 'ON' : 'OFF'} · removing: ${config.guardMedia.join(', ')} · ${flags.count} flagged`
                     };
                 }
                 const want = what === 'on' || what === 'off' ? what === 'on' : null;
-                if (want === null) return { handled: true, react: '⚠️', reply: `Usage: ${PREFIX}guard on|off|status` };
+                if (want === null) return { handled: true, react: '⚠️', reply: `Try it like this: ${PREFIX}guard on|off|status` };
                 config.guardEnabled = want;
                 log.info(`guard toggled ${want ? 'ON' : 'OFF'} by ${ctx.senderLabel}`);
                 return {
                     handled: true,
                     react  : want ? '🛡️' : '🔕',
-                    reply  : `Guard is now ${want ? 'ON' : 'OFF'}.`
+                    reply  : `🛡️ Media guard is now ${want ? 'ON' : 'OFF'}.`
                 };
             }
 
