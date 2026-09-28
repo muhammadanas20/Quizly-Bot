@@ -430,6 +430,11 @@ export function createGameEngine({
     const timeoutMs   = Number.isFinite(config.gameTimeoutMs) ? config.gameTimeoutMs : 180_000;
     const cooldownMs  = Math.max(0, Math.min(Number.isFinite(config.gameCooldownMs) ? config.gameCooldownMs : 5_000, 5_000));
     const participationWindowMs = Math.max(5_000, cooldownMs);
+    // How long the "don't repeat the last question" memory lives per chat.
+    // It only matters across back-to-back rounds (seconds apart); after a day
+    // of silence, forgetting it costs at most one repeat — and evicting it
+    // keeps these maps flat in a bot that outlives its question fatigue.
+    const repeatMemoryMs = 24 * 60 * 60 * 1000;
     const maxAttempts = Number.isFinite(config.gameMaxAttempts) ? config.gameMaxAttempts : 12;
     let enabled = scores?.gamesEnabled?.(config.gamesEnabled !== false) ?? (config.gamesEnabled !== false);
     let generation = 0;            // invalidates in-flight starts after stop/reset
@@ -696,7 +701,7 @@ export function createGameEngine({
                 round.answer = word;
                 round.accepted = [word];
                 round.scrambled = scrambleWord(word, random);
-                lastScramble.set(ctx.jid, word);
+                lastScramble.set(ctx.jid, { at: now(), value: word });
                 return {
                     round,
                     text: `${game.emoji} *Word scramble* — ${word.length} letters, first correct word wins ${game.points} pts\n\n`
@@ -710,7 +715,7 @@ export function createGameEngine({
                 if (!entry) return { error: 'The trivia pool is empty.' };
                 round.pool = entry;
                 round.accepted = entry.a;
-                lastQuestion.set(ctx.jid, entry.q);
+                lastQuestion.set(ctx.jid, { at: now(), value: entry.q });
                 return {
                     round,
                     text: `${game.emoji} *Trivia* — first correct answer wins ${game.points} pts\n\n`
@@ -740,8 +745,8 @@ export function createGameEngine({
         linear: 'linear algebra', calculus: 'calculus', mvc: 'multivariable calculus',
         pf: 'programming fundamentals', oop: 'OOP', ds: 'data structures', coal: 'COAL / assembly'
     };
-    const lastQuestion = new Map();
-    const lastScramble = new Map();
+    const lastQuestion = new Map();   // jid → { at, value }
+    const lastScramble = new Map();   // jid → { at, value }
 
     /** O(pool size), bounded; no immediate repeats even with a fixed RNG. */
     function pickDifferent(pool, previous, field) {
@@ -761,7 +766,7 @@ export function createGameEngine({
                 return override ? { ...e, a: override } : e;
             });
         const pool = [...builtin, ...contributed, ...ai];
-        const picked = pickDifferent(pool, lastQuestion.get(jid), 'q');
+        const picked = pickDifferent(pool, lastQuestion.get(jid)?.value, 'q');
         if (picked && ai.includes(picked)) content?.markUsed?.('trivia', picked);
         return picked;
     }
@@ -769,12 +774,12 @@ export function createGameEngine({
     function pickPuzzle(jid) {
         const ai = content?.puzzles?.() || [];
         const pool = [...BUILTIN_PUZZLES, ...ai];
-        const picked = pickDifferent(pool, lastScramble.get(jid), 'word') || { word: 'garden', clue: '' };
+        const picked = pickDifferent(pool, lastScramble.get(jid)?.value, 'word') || { word: 'garden', clue: '' };
         if (ai.includes(picked)) content?.markUsed?.('scramble', picked);
         return picked;
     }
 
-    const lastConcept = new Map();   // "jid|kind" → last question text
+    const lastConcept = new Map();   // "jid|kind" → { at, value }
 
     /** Built-in bank + AI pool for math/code, filtered by level and topic. */
     function pickConcept(kind, level, topic, jid) {
@@ -785,8 +790,8 @@ export function createGameEngine({
         if (!pool.length) pool = [...bank, ...ai].filter((e) => !topic || e.topic === topic);
         if (!pool.length) return null;
         const stamp = `${jid}|${kind}`;
-        const picked = pickDifferent(pool, lastConcept.get(stamp), 'q');
-        lastConcept.set(stamp, picked.q);
+        const picked = pickDifferent(pool, lastConcept.get(stamp)?.value, 'q');
+        lastConcept.set(stamp, { at: now(), value: picked.q });
         if (ai.includes(picked)) content?.markUsed?.(kind, picked);
         return picked;
     }
@@ -1943,6 +1948,11 @@ export function createGameEngine({
         for (const [stamp, at] of participationAt) {
             if (at + participationWindowMs <= now()) participationAt.delete(stamp);
         }
+        // The "don't repeat the last question" memory is per-chat too; let it
+        // die with the silence it was protecting against.
+        for (const [jid, e] of lastQuestion) if (now() - e.at >= repeatMemoryMs) lastQuestion.delete(jid);
+        for (const [jid, e] of lastScramble) if (now() - e.at >= repeatMemoryMs) lastScramble.delete(jid);
+        for (const [stamp, e] of lastConcept) if (now() - e.at >= repeatMemoryMs) lastConcept.delete(stamp);
         return out;
     }
 

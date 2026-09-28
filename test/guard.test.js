@@ -388,3 +388,41 @@ test('sweep: attach is a no-op on sockets without a raw ws emitter', async () =>
     await tick();
     assert.equal(sent.length, 0);
 });
+
+test('guard: the per-user counter keeps the worst offenders and never grows past 200 users', async () => {
+    const config = loadConfig({ GUARD_MEDIA: 'sticker', GEMINI_API_KEY: 'k' });
+    const sock = {
+        sendMessage: async () => ({ key: { id: 'X' } }),
+        signalRepository: { lidMapping: { getPNForLID: () => undefined } }
+    };
+
+    const flagged = {};   // id → label
+    const flags = {
+        has   : (ids) => [...ids].some((id) => flagged[id]),
+        find  : (ids) => {
+            for (const id of ids) if (flagged[id]) return { key: id, entry: { keys: [id], label: flagged[id], media: null } };
+            return null;
+        },
+        alias       : () => false,
+        bumpDeleted : () => 1
+    };
+    const guard = createGuard({ sock, flags, config, log, isAdmin: async () => true });
+
+    const msgFor = (id, n) => ({
+        key    : { remoteJid: GROUP, participant: `${id}@s.whatsapp.net`, fromMe: false, id: `M${id}-${n}` },
+        message: { stickerMessage: { url: 'u', mimetype: 'image/webp' } }
+    });
+
+    // one spammy user, then 200 distinct quiet users → 201 labels in the map
+    flagged['923001111111'] = 'Spammer';
+    for (let i = 0; i < 50; i++) await guard.handle(msgFor('923001111111', i));
+    for (let i = 0; i < 200; i++) {
+        const id = `92300${String(2222200 + i).padStart(8, '0')}`;
+        flagged[id] = `user${i}`;
+        await guard.handle(msgFor(id, 0));
+    }
+
+    assert.equal(guard.stats.deleted, 250);
+    assert.equal(guard.stats.byUser.size, 200, 'the map is capped at 200 users');
+    assert.equal(guard.stats.byUser.get('Spammer'), 50, 'the worst offender is always kept');
+});

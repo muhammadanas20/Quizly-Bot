@@ -100,7 +100,25 @@ export function createGroupCache({ sock, getMe, log, ttlMs = 10 * 60 * 1000 }) {
         cache.delete(jid);
     }
 
-    return { get, refresh, isAdmin, subjectOf, nameOf, invalidate, get size() { return cache.size; } };
+    /**
+     * Drop entries untouched for a full TTL and return how many were removed.
+     *
+     * The TTL above only makes entries *stale* — without eviction the cache
+     * keeps every group the bot has ever seen forever, and each entry holds
+     * the display names of ALL its members. On a bot that lives for months
+     * that is steady, silent RAM growth, so the caller (bot.js) runs this on
+     * its existing 60 s housekeeping interval.
+     */
+    function sweep() {
+        const cutoff = Date.now() - ttlMs;
+        let dropped = 0;
+        for (const [jid, entry] of cache) {
+            if (entry.at < cutoff) { cache.delete(jid); dropped++; }
+        }
+        return dropped;
+    }
+
+    return { get, refresh, isAdmin, subjectOf, nameOf, invalidate, sweep, get size() { return cache.size; } };
 }
 
 export default createGroupCache;

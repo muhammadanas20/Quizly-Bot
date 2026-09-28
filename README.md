@@ -391,13 +391,19 @@ Additional memory work:
 * `--max-old-space-size=320` and PM2 `max_memory_restart: 450M` (see `ecosystem.config.cjs`).
 * `scripts/setup-vm.sh` creates a **2 GiB swap file** and sets `vm.swappiness=10`.
 * One solve per chat at a time; duplicate triggers are dropped, not queued.
-* Group admin status is cached for 10 minutes so the guard never adds a round trip.
+* Group admin status is cached for 10 minutes so the guard never adds a round
+  trip. Every entry holds **all** the group's member names, so quiet groups are
+  evicted on the 60 s housekeeping interval — the cache can only grow as large
+  as the groups you actually talk in.
 * Game rounds live in memory; scores and the persisted owner switch use
   `data/scores.json` (debounced point writes, immediate atomic reset/toggle), and
   the bounded daily AI pool uses `data/game-content.json` (atomic replacement).
   One `Map` lookup decides whether an ordinary message is a guess, so games do
   not add work to the guard path. The AI refresh is background-only and pauses
-  while games are off.
+  while games are off. The per-chat "don't repeat the last question" memory
+  expires after 24 h of silence, and the guard's per-user removal counter is
+  capped at the top 200 offenders — nothing in a long-running process grows
+  without a bound.
 
 Check it yourself on the VM: `pm2 monit` or `free -h`.
 

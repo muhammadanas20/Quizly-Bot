@@ -91,3 +91,19 @@ test('subjectOf returns the cached group name for logs', async () => {
     assert.equal(cache.subjectOf(GROUP), 'Study Group');
     assert.equal(cache.subjectOf('other@g.us'), '');
 });
+
+test('sweep: evicts entries that went quiet past the TTL, keeps fresh ones', async () => {
+    const stale = make({ participants: [], ttlMs: 1 });
+    const fresh = make({ participants: [] });
+    await stale.cache.isAdmin(GROUP);
+    await fresh.cache.isAdmin('200000000000000001@g.us');
+
+    await new Promise((r) => setTimeout(r, 5));   // let the stale entry age out
+
+    assert.equal(stale.cache.size, 1, 'a stale entry is still served until swept');
+    assert.equal(stale.cache.sweep(), 1);
+    assert.equal(stale.cache.size, 0);
+
+    assert.equal(fresh.cache.sweep(), 0, 'a fresh entry survives the sweep');
+    assert.equal(fresh.cache.size, 1);
+});

@@ -128,6 +128,22 @@ export function createGuard({ sock, flags, config, log, isAdmin }) {
     const stats = { deleted: 0, viewOnce: 0, skippedNotAdmin: 0, byUser: new Map(), lastAt: null };
     const whitelist = new Set(config.guardWhitelist);
 
+    /**
+     * Per-user removal counter for !stats. Capped so a bot running for months
+     * cannot grow one entry per distinct flagged person forever: past the cap
+     * the biggest offenders are kept and the long tail is dropped — that is
+     * all the counter is ever used for.
+     */
+    const BY_USER_CAP = 200;
+    function bumpByUser(label) {
+        stats.byUser.set(label, (stats.byUser.get(label) || 0) + 1);
+        if (stats.byUser.size > BY_USER_CAP) {
+            const keep = [...stats.byUser.entries()].sort((a, b) => b[1] - a[1]).slice(0, BY_USER_CAP);
+            stats.byUser.clear();
+            for (const [k, v] of keep) stats.byUser.set(k, v);
+        }
+    }
+
     async function handle(msg) {
         if (!msg?.key) return null;
 
@@ -182,7 +198,7 @@ export function createGuard({ sock, flags, config, log, isAdmin }) {
         stats.deleted++;
         if (kind === 'viewonce') stats.viewOnce++;
         stats.lastAt = new Date().toISOString();
-        stats.byUser.set(label, (stats.byUser.get(label) || 0) + 1);
+        bumpByUser(label);
 
         // A revoked one-time message is revoked blind: WhatsApp keeps the media
         // from web-class linked devices, so all we ever get is the key. The
@@ -232,7 +248,7 @@ export function createGuard({ sock, flags, config, log, isAdmin }) {
                 stats.deleted++;
                 stats.viewOnce++;
                 stats.lastAt = new Date().toISOString();
-                stats.byUser.set(label, (stats.byUser.get(label) || 0) + 1);
+                bumpByUser(label);
                 log.debug(`guard: swept withheld one-time message from ${label} in ${key.remoteJid} (${total} total)`);
             })
             .catch((err) => log.debug(`view-once sweep: ${err.message}`));
