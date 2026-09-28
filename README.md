@@ -7,7 +7,7 @@ A WhatsApp bot that does three jobs, built to run on a **1 GiB RAM** VM:
 2. **Silent media guard** — a member you flag has their stickers and photos removed
    the instant they post them, including view-once photos, in any group where the bot is
    admin. **The bot never warns or sends replacement media.** The flagged media just disappears.
-3. **Group games** — eight games (including maths and programming quizzes) the whole group plays together
+3. **Group games** — nine games (including maths and programming quizzes) the whole group plays together
    (`!game`), with a per-group scoreboard every member contributes to (`!top`).
 
 ---
@@ -126,7 +126,7 @@ its own is an explicit stickers-only policy and leaves it alone.
 
 ## Games the whole group plays
 
-Eight games, one round per chat at a time — and a
+Nine games, one round per chat at a time — and a
 scoreboard every member contributes to:
 
 | Game | Start it with | How you win | Points |
@@ -134,6 +134,7 @@ scoreboard every member contributes to:
 | 🔢 `number` | `!game number [1-100]` | send numbers; too high / too low, hot-and-cold, and a narrowing hint after four misses | 10 − 1 per wrong guess |
 | 🧩 `riddle` | `!game riddle` | first correct answer to a tricky brain teaser — built-in and rotating AI riddles | 8 |
 | 🎭 `emoji` | `!game emoji` | decode the film, phrase or thing the emojis stand for (🦁👑 = The Lion King) — built-in, owner and rotating AI puzzles | 8 |
+| ⚡ `react` | `!game react` | the bot posts one emoji only; react to that message with the same emoji to win | 8 |
 | ✊ `rps` | `!game rps` | the bot has secretly thrown; call the hand that beats it — rock, paper or scissors. Two misses from one player reveal the hand | 8 |
 | ➗ `math` | `!game math [easy\|hard] [linear\|calc\|mvc\|arith]` | arithmetic plus linear algebra (matrices, determinants, vector spaces, eigenvalues), calculus and multivariable calculus | 5 easy / 10 hard |
 | 💻 `code` | `!game code [easy\|hard] [pf\|oop\|ds\|coal]` | programming fundamentals, OOP, data structures, COAL (8086 assembly, registers, flags) | 5 easy / 10 hard |
@@ -493,7 +494,7 @@ src/
   quiz.js                 trigger → download → AI → format → send
   format.js               JSON parsing + the per-question layout + chunking
   commands.js             !flag / !unflag / !flags / !guard / !quiz / !stats / !game / !guess / !top
-  games.js                the eight games + rounds, hints, scoring, global controls
+  games.js                the nine games + rounds, hints, scoring, global controls
   scores.js               per-group boards + contributed questions + owner switch, data/scores.json
   game-content.js         batched AI pools (trivia/scramble/math/code)
   banks.js                built-in maths + programming question banks, data/game-content.json

@@ -419,6 +419,37 @@ test('router: !game starts a round and a bare number from another member wins it
     assert.equal(scores.board(GROUP).length, 2, 'both members are on the board');
 });
 
+test('router: reaction race sends only its emoji prompt, then announces the correct reaction', async () => {
+    const { router, sent, texts, reacts, games } = world();
+
+    await router.processMessage(msg({
+        key    : { remoteJid: GROUP, participant: OWNER + '@s.whatsapp.net', fromMe: false, id: 'R0' },
+        message: { conversation: '!game react' }
+    }));
+
+    const targetEmoji = games.active(GROUP).targetEmoji;
+    const prompt = sent.find((item) => item.content.text);
+    assert.equal(prompt.content.text, targetEmoji, 'the bot posts no instructions with the prompt');
+    assert.deepEqual(texts(), [targetEmoji]);
+    assert.deepEqual(reacts(), ['⚡'], 'the command itself gets only its normal reaction confirmation');
+
+    const result = await router.processMessage(msg({
+        key: { remoteJid: GROUP, participant: TARGET, fromMe: false, id: 'R1' },
+        message: {
+            reactionMessage: {
+                text: targetEmoji,
+                key: { remoteJid: GROUP, id: 'S' }
+            }
+        }
+    }));
+
+    assert.deepEqual(result, { game: true, reaction: true });
+    assert.equal(texts().length, 2, 'the winner announcement is sent only after the correct reaction');
+    assert.ok(texts()[1].includes(`reacted with ${targetEmoji}`));
+    assert.match(texts()[1], /Lightning fast/);
+    assert.equal(games.active(GROUP), null);
+});
+
 test('router: a quiz screenshot still reaches the solver while a round is running', async () => {
     const { router, texts, games } = world();
 
