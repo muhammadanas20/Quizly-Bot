@@ -314,11 +314,62 @@ export const GAME_POINTS = Object.freeze({
     riddle : 8,
     rps    : 8,
     emoji  : 8,
+    react  : 8,
     math   : 5,
     code   : 5,
     scramble: 5,
     trivia : 5
 });
+
+// ─── Reaction race — every emoji you can react with ─────────────────────────
+// A big, deduplicated pool so the bot really can drop *any* emoji. WhatsApp
+// reactions work best with single-codepoint emojis; ZWJ sequences are avoided
+// here on purpose so matching stays exact.
+export const REACTION_EMOJIS = Object.freeze([
+    '😀','😃','😄','😁','😆','😅','🤣','😂','🙂','🙃','😉','😊','😇','🥰','😍','🤩','😘','😗','😚','😙',
+    '🥲','😋','😛','😜','🤪','😝','🤑','🤗','🤭','🫢','🫣','🤫','🤔','🫡','🤐','🤨','😐','😑','😶','😶‍🌫️',
+    '😏','😒','🙄','😬','😮‍💨','🤥','🫨','😌','😔','😪','🤤','😴','😷','🤒','🤕','🤢','🤮','🥵','🥶','🥴',
+    '😵','😵‍💫','🤯','🤠','🥳','🥸','😎','🤓','🧐','😕','🫤','😟','🙁','☹️','😮','😯','😲','😳','🥺','🥹',
+    '😦','😧','😨','😰','😥','😢','😭','😱','😖','😣','😞','😓','😩','😫','🥱','😤','😡','😠','🤬','😈',
+    '👿','💀','☠️','💩','🤡','👹','👺','👻','👽','👾','🤖','😺','😸','😹','😻','😼','😽','🙀','😿','😾',
+    '🙈','🙉','🙊','🐵','🐒','🦍','🦧','🐶','🐕','🦮','🐩','🐺','🦊','🦝','🐱','🐈','🐈‍⬛','🦁','🐯','🐅',
+    '🐆','🐴','🫎','🫏','🐎','🦄','🦓','🦌','🦬','🐮','🐂','🐃','🐄','🐷','🐖','🐗','🐽','🐏','🐑','🐐',
+    '🐪','🐫','🦙','🦒','🐘','🦣','🦏','🦛','🐭','🐁','🐀','🐹','🐰','🐇','🐿️','🦫','🦔','🦇','🐻','🐨',
+    '🐼','🦥','🦦','🦨','🦘','🦡','🐾','🦃','🐔','🐓','🐣','🐤','🐥','🐦','🐧','🕊️','🦅','🦆','🦢','🦉',
+    '🦤','🪶','🦩','🦜','🐸','🐊','🐢','🦎','🐍','🐲','🐉','🦕','🦖','🐳','🐋','🐬','🦭','🐟','🐠','🐡',
+    '🦈','🐙','🐚','🪸','🪼','🐌','🦋','🐛','🐜','🐝','🪲','🐞','🦗','🪳','🕷️','🕸️','🦂','🦟','🪰','🪱',
+    '🦠','💐','🌸','💮','🪷','🏵️','🌹','🥀','🌺','🌻','🌼','🌷','🪻','🌱','🪴','🌲','🌳','🌴','🌵','🌾',
+    '🌿','☘️','🍀','🍁','🍂','🍃','🫛','🍄','🌰','🍇','🍈','🍉','🍊','🍋','🍌','🍍','🥭','🍎','🍏','🍐',
+    '🍑','🍒','🍓','🫐','🥝','🍅','🫒','🥥','🥑','🍆','🥔','🥕','🌽','🌶️','🫑','🥒','🥬','🥦','🧄','🧅',
+    '🫘','🥜','🫚','🍞','🥐','🥖','🫓','🥨','🥯','🥞','🧇','🧀','🍖','🍗','🥩','🥓','🍔','🍟','🍕','🌭',
+    '🥪','🌮','🌯','🫔','🥙','🧆','🥚','🍳','🥘','🍲','🫕','🥣','🥗','🍿','🧈','🧂','🥫','🍱','🍘','🍙',
+    '🍚','🍛','🍜','🍝','🍠','🍢','🍣','🍤','🍥','🥮','🍡','🥟','🥠','🥡','🦀','🦞','🦐','🦑','🦪','🍦',
+    '🍧','🍨','🍩','🍪','🎂','🍰','🧁','🥧','🍫','🍬','🍭','🍮','🍯','🍼','🥛','☕','🫖','🍵','🍶','🍾',
+    '🍷','🍸','🍹','🍺','🍻','🥂','🥃','🫗','🥤','🧋','🧃','🧉','🧊','🥢','🍽️','🍴','🥄','🔪','🫙','🏺',
+    '🌍','🌎','🌏','🌐','🗺️','🗾','🧭','🏔️','⛰️','🌋','🗻','🏕️','🏖️','🏜️','🏝️','🏞️','🏟️','🏛️','🏗️','🧱',
+    '🪨','🪵','🛖','🏘️','🏚️','🏠','🏡','🏢','🏣','🏤','🏥','🏦','🏨','🏩','🏪','🏫','🏬','🏭','🏯','🏰',
+    '💒','🗼','🗽','⛪','🕌','🛕','🕍','⛩️','🕋','⛲','⛺','🌁','🌃','🏙️','🌄','🌅','🌆','🌇','🌉','♨️',
+    '🎠','🛝','🎡','🎢','💈','🎪','🚂','🚃','🚄','🚅','🚆','🚇','🚈','🚉','🚊','🚝','🚞','🚋','🚌','🚍',
+    '🚎','🚐','🚑','🚒','🚓','🚔','🚕','🚖','🚗','🚘','🚙','🛻','🚚','🚛','🚜','🦯','🦽','🦼','🛴','🚲',
+    '🛵','🛺','🚨','🛞','🚀','🛸','🚁','🛩️','🛥️','🚤','⛵','🛶','🚢','⚓','🪝','⛽','🚧','🚦','🚥','🗿',
+    '🧳','🎈','🎏','🎀','🎁','🎗️','🎟️','🎫','🎖️','🏆','🏅','🥇','🥈','🥉','⚽','⚾','🥎','🏀','🏐','🏈',
+    '🏉','🎾','🥏','🎳','🏏','🏑','🏒','🥍','🏓','🏸','🥊','🥋','🥅','⛳','⛸️','🎣','🤿','🎽','🎿','🛷',
+    '🥌','🎯','🪀','🪁','🎱','🔮','🪄','🧿','🪬','🎮','🕹️','🎰','🎲','🧩','🧸','🪅','🪩','🪆','♠️','♥️',
+    '♦️','♣️','🃏','🀄','🎴','🎭','🖼️','🎨','🧵','🪡','🧶','🪢','👓','🕶️','🥽','🥼','🦺','👔','👕','👖',
+    '🧣','🧤','🧥','🧦','👗','👘','🥻','🩱','🩲','🩳','👙','👚','👛','👜','👝','🛍️','🎒','🩴','👞','👟',
+    '🥾','🥿','👠','👡','🩰','👢','👑','👒','🎩','🎓','🧢','🪖','⛑️','📿','💄','💍','💎','🔇','🔈','🔉',
+    '🔊','📢','📣','📜','📃','📄','📑','🧾','📊','📈','📉','🗒️','🗓️','📆','📅','🗑️','📇','🗃️','🗳️','🗄️',
+    '📋','📁','📂','🗂️','🗞️','📰','📓','📔','📒','📕','📗','📘','📙','📚','📖','🔖','🧷','🔗','📎','🖇️',
+    '📐','📏','🧮','📌','📍','✂️','🖊️','🖋️','✒️','🖌️','🖍️','📝','✏️','🔍','🔎','🔏','🔐','🔒','🔓','💌',
+    '💘','💝','💖','💗','💓','💞','💕','💟','❣️','💔','❤️','🧡','💛','💚','💙','🩵','💜','🖤','🩶','🤍',
+    '🤎','💋','🩸','🩹','💊','💉','🩺','🧬','🧫','🧪','🌡️','🧹','🪠','🧺','🧻','🚽','🚿','🛁','🪥','🪮',
+    '🧼','🪞','🪟','🛋️','🪑','🚪','🛏️','🛌','🎁','🎈','🎏','🎀','🎊','🎉','🎎','🎐','🎑','🧧','🪔','🪭',
+    '🪗','🪘','🪇','🪈','🪉','🪕','🎸','🎹','🎷','🎺','🎻','🪕','🥁','🪘','📱','📲','☎️','📞','📟','📠',
+    '🔋','🪫','📡','💻','🖥️','🖨️','⌨️','🖱️','🖲️','💽','💾','💿','📀','🧲','🪛','🔧','🔨','⚒️','🛠️','⛏️',
+    '🪓','🪚','🔩','⚙️','🪤','🧱','⛓️','🧰','🧲','🔫','💣','🧨','🪓','🔪','🗡️','⚔️','🛡️','🚬','⚰️','🪦',
+    '⚱️','🏺','🔮','📿','🧿','💈','⚗️','🔭','🔬','🕳️','🩹','🩺','💊','💉','🩸','🧬','🦠','🧫','🧪','🌡️',
+    '🧹','🧺','🧻','🚽','🚿','🛁','🪥','🧼','🪞','🪟','🛋️','🪑','🚪','🛏️','🛌','🧸','🪆','🖼️','🛍️','🎁'
+]);
 
 export const PARTICIPATION_POINTS = 1;
 /** Contributing a trivia question is worth points too — but only the first few. */
@@ -377,6 +428,12 @@ export const GAMES = Object.freeze([
         title: 'Trivia', points: GAME_POINTS.trivia,
         how: '!game trivia → send the answer',
         blurb: 'General knowledge, plus the questions the owner contributed. 5 pts.'
+    },
+    {
+        name: 'react', aliases: ['react', 'reaction', 'reactrace', 'emojirace', 'reflex', 'speedreact', 'fastreact', 'emoji-race', 'react-race', 'reflexrace'], emoji: '⚡', mode: 'race',
+        title: 'Reaction Race', points: GAME_POINTS.react,
+        how: '!game react → react with the same emoji first',
+        blurb: 'Bot drops a random emoji — first to react with it wins! 8 pts. Works with any emoji.'
     }
 ]);
 
@@ -565,6 +622,7 @@ const REVEAL = {
     riddle  : (r) => `the answer was *${r.accepted[0]}*`,
     emoji   : (r) => `the answer was *${r.accepted[0]}*`,
     rps     : (r) => `the bot threw *${r.answer}*`,
+    react   : (r) => `the emoji was *${r.targetEmoji || r.answer}*`,
     math    : (r) => `the answer was *${r.accepted ? r.accepted[0] : r.answer}*`,
     code    : (r) => `the answer was *${r.accepted[0]}*`,
     scramble: (r) => `the word was *${r.answer}*`,
@@ -902,6 +960,19 @@ export function createGameEngine({
                 };
             }
 
+            case 'react': {
+                const emoji = pickOne(REACTION_EMOJIS, random);
+                round.targetEmoji = emoji;
+                round.answer = emoji;
+                round.accepted = [emoji];
+                round.botMessageId = null; // filled after the bot message is sent
+                lastReact.set(ctx.jid, { at: now(), value: emoji });
+                return {
+                    round,
+                    text: `${game.emoji} *Reaction Race* — ${game.points} pts\n\nReact to THIS message with ${emoji} as fast as you can!\nFirst to react with the same emoji wins.\n\nYou can also just send ${emoji} in chat if reactions are tricky.${tail.replace('Send your answer.', 'React with ' + emoji + ' to win!')}`
+                };
+            }
+
             default:
                 return { error: 'Unknown game.' };
         }
@@ -915,6 +986,7 @@ export function createGameEngine({
     const lastRiddle = new Map();     // jid → { at, value }
     const lastEmoji = new Map();      // jid → { at, value }
     const lastScramble = new Map();   // jid → { at, value }
+    const lastReact = new Map();      // jid → { at, value }
 
     /** O(pool size), bounded; no immediate repeats even with a fixed RNG. */
     function pickDifferent(pool, previous, field) {
@@ -1007,6 +1079,7 @@ export function createGameEngine({
             case 'riddle':   return `💡 The answer starts with *${String(round.accepted[0])[0].toUpperCase()}*`;
             case 'emoji':    return `💡 It is a ${round.cat} · the answer starts with *${String(round.accepted[0])[0].toUpperCase()}*`;
             case 'rps':      return '💡 Rock beats Scissors · Paper beats Rock · Scissors beats Paper';
+            case 'react':    return `💡 React with ${round.targetEmoji} — same emoji, same message!`;
             case 'trivia':   return `💡 The answer starts with *${String(round.accepted[0])[0].toUpperCase()}*`;
             case 'math':     return round.accepted
                 ? `💡 The answer starts with *${String(round.accepted[0])[0].toUpperCase()}*`
@@ -1184,6 +1257,28 @@ export function createGameEngine({
                 return { kind: 'wrong' };
             }
 
+            case 'react': {
+                // Text fallback: sending the emoji as a message also wins
+                if (raw === round.targetEmoji || raw.includes(round.targetEmoji)) {
+                    if (entry.tried.has(raw)) return { kind: 'repeat', value: raw };
+                    return { kind: 'win', points: GAME_POINTS.react };
+                }
+                // For explicit !guess, any other emoji/text is a miss
+                if (!explicit) {
+                    // Allow bare emoji messages to be treated as attempts
+                    // If it's a single emoji (or short), treat as wrong attempt
+                    if (raw.length <= 8) {
+                        if (entry.tried.has(raw)) return { kind: 'repeat', value: raw };
+                        entry.tried.add(raw);
+                        return { kind: 'wrong', reply: `Not ${round.targetEmoji} — keep trying!` };
+                    }
+                    return { kind: 'ignore' };
+                }
+                if (entry.tried.has(raw)) return { kind: 'repeat', value: raw };
+                entry.tried.add(raw);
+                return { kind: 'wrong', reply: `Nope — react with ${round.targetEmoji}!` };
+            }
+
             case 'trivia':
             case 'riddle':
             case 'emoji': {
@@ -1259,6 +1354,7 @@ export function createGameEngine({
         lastRiddle.clear();
         lastEmoji.clear();
         lastScramble.clear();
+        lastReact.clear();
         if (send && cancelled.length) {
             // Sequential/async: do not hold up the owner's confirmation or
             // flood the WhatsApp socket if many groups had an open round.
@@ -1531,6 +1627,85 @@ export function createGameEngine({
      * only text that plainly looks like an answer is treated as one, so normal
      * chat keeps flowing to the quiz solver untouched.
      */
+    function setBotMessageId(jid, messageId) {
+        const round = active(jid);
+        if (!round) return false;
+        if (round.name !== 'react') return false;
+        round.botMessageId = messageId;
+        return true;
+    }
+
+    /**
+     * Handle a reaction event — the core of the reaction race game.
+     * WhatsApp sends a reaction as a message with reactionMessage.text = emoji
+     * and reactionMessage.key.id = id of message being reacted to.
+     */
+    async function handleReaction(ctx, { emoji, targetId }) {
+        if (!enabled) return { handled: false };
+        const round = active(ctx.jid);
+        if (!round || round.closed) return { handled: false };
+        if (round.name !== 'react') return { handled: false };
+        if (!emoji) return { handled: false }; // empty = removal
+
+        const label = await labelOf(ctx);
+        if (!enabled || active(ctx.jid) !== round || round.closed) {
+            return { handled: false };
+        }
+        const key = keyOf(ctx);
+        const entry = playerEntry(round, key, label, idsOf(ctx));
+        rememberIds(ctx, key);
+
+        if (entry.guesses >= maxAttempts) {
+            return {
+                handled: true,
+                react: '🚫',
+                reply: `You’ve used all ${maxAttempts} guesses this round. Try again next round.`
+            };
+        }
+
+        const cleanEmoji = String(emoji).trim();
+        if (!cleanEmoji) return { handled: false };
+
+        if (entry.tried.has(cleanEmoji)) {
+            return { handled: true, react: '♻️', reply: `You’ve tried *${cleanEmoji}* already. Try another.` };
+        }
+        entry.tried.add(cleanEmoji);
+        entry.guesses = (entry.guesses || 0) + 1;
+
+        // Check if reaction is to the bot's game message (if we know it)
+        const botId = round.botMessageId;
+        const targetMatches = !botId || !targetId || targetId === botId;
+
+        if (cleanEmoji === round.targetEmoji && targetMatches) {
+            // WIN!
+            touchParticipation(round, entry, ctx, label);
+            const scored = scores?.win(round.chat, whoOf(ctx, label), GAME_POINTS.react) || { bonus: 0, streak: 1 };
+            entry.earned += GAME_POINTS.react + (scored.bonus || 0);
+            const bonusLine = scored.bonus ? ` _(+${scored.bonus} streak bonus 🔥${scored.streak})_` : '';
+            const reply = `🎉 *Lightning fast, ${label}!* You reacted with ${cleanEmoji} first!\n\n${points(GAME_POINTS.react)}${bonusLine} · ${entry.guesses} attempt${entry.guesses === 1 ? '' : 's'}`
+                + (scored.player ? `\nTotal: ${scored.player.points} pts` : '');
+            const summary = endRound(round.chat, { winnerKey: key, head: '', reason: 'win' });
+            return { handled: true, react: '🎉', reply: summary ? `${reply}\n\n${summary}` : reply };
+        }
+
+        // Wrong emoji or wrong message
+        round.wrong++;
+        touchParticipation(round, entry, ctx, label);
+        let hint = null;
+        if (!round.hinted && round.wrong >= 4) {
+            hint = hintFor(round);
+            if (hint) round.hinted = true;
+        }
+        let wrongMsg = null;
+        if (cleanEmoji !== round.targetEmoji) {
+            wrongMsg = `❌ Not ${round.targetEmoji} — you sent ${cleanEmoji}`;
+        } else if (!targetMatches) {
+            wrongMsg = `⚠️ You reacted with ${cleanEmoji} but not to THIS message — react to the bot's game message!`;
+        }
+        const reply = [wrongMsg, hint].filter(Boolean).join('\n\n');
+        return { handled: true, wrong: true, react: '❌', reply: reply || undefined };
+    }
+
     async function handleMessage(ctx) {
         if (!enabled) return { handled: false };
         const round = active(ctx.jid);
@@ -1554,6 +1729,18 @@ export function createGameEngine({
                 return parseRpsCall(text) !== null ? takeAttempt(ctx, text, false) : { handled: false };
             case 'scramble':
                 return /^[\p{L}]{3,24}$/u.test(text) ? takeAttempt(ctx, text, false) : { handled: false };
+            case 'react': {
+                // Text fallback: sending the emoji as plain message also counts
+                // Check if text contains the target emoji
+                if (text.includes(round.targetEmoji)) {
+                    return takeAttempt(ctx, text, false);
+                }
+                // Also allow any single emoji as attempt (will be scored as wrong/win via takeAttempt)
+                if (text.length <= 8) {
+                    return takeAttempt(ctx, text, false);
+                }
+                return { handled: false };
+            }
             case 'trivia':
             case 'riddle':
             case 'emoji': {
@@ -2139,6 +2326,7 @@ export function createGameEngine({
         for (const [jid, e] of lastRiddle) if (now() - e.at >= repeatMemoryMs) lastRiddle.delete(jid);
         for (const [jid, e] of lastEmoji) if (now() - e.at >= repeatMemoryMs) lastEmoji.delete(jid);
         for (const [jid, e] of lastScramble) if (now() - e.at >= repeatMemoryMs) lastScramble.delete(jid);
+        for (const [jid, e] of lastReact) if (now() - e.at >= repeatMemoryMs) lastReact.delete(jid);
         for (const [stamp, e] of lastConcept) if (now() - e.at >= repeatMemoryMs) lastConcept.delete(stamp);
         return out;
     }
@@ -2157,6 +2345,8 @@ export function createGameEngine({
         handle,
         guess,
         handleMessage,
+        handleReaction,
+        setBotMessageId,
         addQuestion,
         stop: stopRound,
         list: listText,

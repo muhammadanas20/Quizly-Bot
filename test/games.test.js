@@ -165,7 +165,7 @@ test('parseRpsCall accepts hands, shorthand and emoji, rejects the rest', () => 
 });
 
 test('every advertised game can be started by its canonical name', () => {
-    assert.equal(GAMES.length, 8);
+    assert.equal(GAMES.length, 9);
     assert.equal(findGame('dice'), null, 'dice was removed');
     assert.equal(findGame('coin'), null, 'the coin game was removed');
     assert.equal(findGame('lucky'), null, 'the lucky draw was removed');

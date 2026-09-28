@@ -14,7 +14,7 @@
 
 import { collectSenderIds } from './guard.js';
 import { parseCommand } from './commands.js';
-import { extractText, senderOf, bareJid, isGroupJid, identitiesOf } from './message.js';
+import { extractText, extractReaction, senderOf, bareJid, isGroupJid, identitiesOf } from './message.js';
 
 /** Chats the bot should never respond in. */
 const IGNORED_SUFFIXES = ['@broadcast', '@newsletter'];
@@ -83,8 +83,12 @@ export function createRouter({ sock, config, log, flags, guard, groups, quiz, co
          * The reaction is the confirmation: it lands on the command message
          * itself, so the group sees "done" without the bot having to say
          * anything. Shared by commands and game replies.
+         * Returns the sent reply message (if any) so callers can capture its id
+         * — needed for the reaction race game where players must react to the
+         * bot's own game message.
          */
         async function deliver(out) {
+            let sentReply = null;
             if (out?.react) {
                 try {
                     await sock.sendMessage(jid, { react: { text: out.react, key: msg.key } });
@@ -92,16 +96,48 @@ export function createRouter({ sock, config, log, flags, guard, groups, quiz, co
                     log.debug(`react failed: ${err.message}`);
                 }
             }
-            if (out?.handled && out?.reply) await sock.sendMessage(jid, { text: out.reply });
+            if (out?.handled && out?.reply) {
+                try {
+                    sentReply = await sock.sendMessage(jid, { text: out.reply });
+                } catch (err) {
+                    log.debug(`reply failed: ${err.message}`);
+                    try { sentReply = await sock.sendMessage(jid, { text: out.reply }); } catch {}
+                }
+            }
+            return sentReply;
         }
 
-        // 2. commands
+        // 2a. reaction race — handle emoji reactions before anything else
+        if (!fromMe) {
+            try {
+                const reaction = extractReaction(msg.message);
+                if (reaction && reaction.emoji) {
+                    const out = await games?.handleReaction?.(ctx, { emoji: reaction.emoji, targetId: reaction.targetId });
+                    if (out?.handled) {
+                        await deliver(out);
+                        return { game: true, reaction: true };
+                    }
+                }
+            } catch (err) {
+                log.debug(`reaction game error: ${err.message}`);
+            }
+        }
+
+        // 2b. commands
         if (text.trim().startsWith('!')) {
             const parsed = parseCommand(text);
             if (!parsed) return { unknownCommand: true };
             try {
                 const out = await commands.handle(ctx);
-                await deliver(out);
+                const sent = await deliver(out);
+                if (sent?.key?.id && games?.setBotMessageId) {
+                    try {
+                        const active = games?.active?.(jid);
+                        if (active && active.name === 'react' && !active.botMessageId) {
+                            games.setBotMessageId(jid, sent.key.id);
+                        }
+                    } catch {}
+                }
                 return { command: parsed.name };
             } catch (err) {
                 log.error(`command "${parsed.name}" failed: ${err.message}`);
@@ -119,12 +155,18 @@ export function createRouter({ sock, config, log, flags, guard, groups, quiz, co
         // 3. games — while a round is running, a bare "57" or "heads" is a
         // guess. Uses the same deliver() so a guess confirms with a reaction.
         if (!fromMe && !wantsQuiz) {
-            // A game that throws must never swallow a message that the quiz
-            // solver could still answer, so failures fall through.
             try {
                 const out = await games?.handleMessage?.(ctx);
                 if (out?.handled) {
-                    await deliver(out);
+                    const sent = await deliver(out);
+                    if (sent?.key?.id && games?.setBotMessageId) {
+                        try {
+                            const active = games?.active?.(jid);
+                            if (active && active.name === 'react' && !active.botMessageId) {
+                                games.setBotMessageId(jid, sent.key.id);
+                            }
+                        } catch {}
+                    }
                     return { game: true };
                 }
             } catch (err) {
