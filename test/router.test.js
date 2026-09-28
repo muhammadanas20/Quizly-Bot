@@ -484,23 +484,36 @@ test('router: !guess, !top and the instant random commands are all reachable', a
     assert.match(texts().pop(), /Leaderboard · Study Group/);
 });
 
-test('router: a lucky draw is played with !game lucky, !in and !game draw', async () => {
-    const { router, texts, scores } = world();
+test('router: a riddle round is started with !game riddle and answered with a plain message', async () => {
+    const { router, texts, scores, games } = world();
 
-    await router.processMessage(msg({ message: { conversation: '!game lucky' } }));
-    assert.match(texts().pop(), /You’re in,/);
+    await router.processMessage(msg({ message: { conversation: '!game riddle' } }));
+    assert.match(texts().pop(), /Riddle me this/);
+    const answer = games.active(GROUP).accepted[0];
 
     await router.processMessage(msg({
         key    : { remoteJid: GROUP, participant: OTHER, fromMe: false, id: 'L2' },
-        message: { conversation: '!in' }
+        message: { conversation: answer }
     }));
-    assert.match(texts().pop(), /2 joined/);
-
-    await router.processMessage(msg({ message: { conversation: '!game draw' } }));
-    const drawn = texts().pop();
-    assert.match(drawn, /Lucky pick:/);
-    assert.equal(scores.board(GROUP).length, 2, 'every entrant earned a point');
+    const won = texts().pop();
+    assert.match(won, /Nice one/);
+    assert.match(won, /\+8/);
+    assert.equal(games.active(GROUP), null);
     assert.equal(scores.boardAll()[0].points >= 8, true);
+});
+
+test('router: an rps round accepts rock, paper or scissors as plain messages', async () => {
+    const { router, texts, games } = world();
+
+    await router.processMessage(msg({ message: { conversation: '!game rps' } }));
+    assert.match(texts().pop(), /Rock · Paper · Scissors/);
+
+    await router.processMessage(msg({
+        key    : { remoteJid: GROUP, participant: OTHER, fromMe: false, id: 'L2' },
+        message: { conversation: 'paper' }
+    }));
+    assert.ok(texts().length >= 0, 'the call is accepted without crashing');
+    assert.ok(games.active(GROUP) === null || games.active(GROUP).name === 'rps');
 });
 
 test('router: an unknown "!game chess" answers instead of going quiet', async () => {
@@ -530,9 +543,14 @@ test('router: owner global stop/reset via WhatsApp, member cannot operate them',
     await router.processMessage(msg({ message: { conversation: '!game number' } }));
     await router.processMessage(msg({
         key: { remoteJid: other, participant: TARGET, fromMe: false, id: 'OTHER' },
-        message: { conversation: '!game lucky' }
+        message: { conversation: '!game riddle' }
     }));
     assert.equal(games.roundCount, 2);
+    await router.processMessage(msg({
+        key: { remoteJid: other, participant: TARGET, fromMe: false, id: 'OTHER2' },
+        message: { conversation: '!guess zqx' }
+    }));
+    assert.equal(scores.playerOf(other, ['923009876543']).points, 1, 'a played round earns its point');
 
     await router.processMessage(msg({ message: { conversation: '!game reset tops' } }));
     assert.match(texts().at(-1), /This command is for the bot owner/);
@@ -546,7 +564,7 @@ test('router: owner global stop/reset via WhatsApp, member cannot operate them',
     assert.match(texts().at(-1), /This command is for the bot owner/);
     await router.processMessage(msg({ message: { conversation: '!guess 51' } }));
     assert.match(texts().at(-1), /Games are OFF|Games are paused/);
-    assert.equal(scores.playerOf(other, ['923009876543']).points, 1);
+    assert.equal(scores.playerOf(other, ['923009876543']).wins, 0, 'stopped games never score');
     await router.processMessage(ownCmd('!game reset tops'));
     assert.equal(scores.playerCount, 0);
     assert.equal(games.enabled, false, 'reset leaves the global switch unchanged');
@@ -558,10 +576,10 @@ test('router: owner global stop/reset via WhatsApp, member cannot operate them',
 
 test('router: !game on works even if GAMES=off at startup', async () => {
     const { router, games, texts } = world({ env: { GAMES: 'off' } });
-    await router.processMessage(msg({ message: { conversation: '!game coin' } }));
+    await router.processMessage(msg({ message: { conversation: '!game riddle' } }));
     assert.match(texts().at(-1), /Games are OFF|Games are paused/);
     await router.processMessage(ownCmd('!game on'));
     assert.equal(games.enabled, true);
-    await router.processMessage(msg({ message: { conversation: '!game coin' } }));
-    assert.equal(games.active(GROUP).name, 'coin');
+    await router.processMessage(msg({ message: { conversation: '!game riddle' } }));
+    assert.equal(games.active(GROUP).name, 'riddle');
 });

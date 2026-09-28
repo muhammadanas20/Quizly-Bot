@@ -71,7 +71,7 @@ test('trace exercises agree with independently computed results', () => {
 test('detailed help retains owner commands and ordinary game controls', () => {
     for (const command of ['!game addq', '!game modify', '!game delete', '!game listq',
         '!game restore', '!game add new ds', '!game answer', '!game reset tops',
-        '!game reset @member', '!game on', '!game stop', '!guess', '!in', '!top all']) {
+        '!game reset @member', '!game on', '!game stop', '!guess', '!top all']) {
         assert.ok(GAME_GUIDE.includes(command), command);
     }
     assert.ok(!GAME_GUIDE.includes('```'), 'help is prose, not a wide monospace table');

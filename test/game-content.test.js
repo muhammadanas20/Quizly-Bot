@@ -16,6 +16,10 @@ const config = loadConfig({
     GAME_AI_TRIVIA_COUNT: '2', GAME_AI_PUZZLE_COUNT: '2', GAME_AI_MATH_COUNT: '2', GAME_AI_CODE_COUNT: '2'
 });
 
+const emojis = (prefix, n = 2) => Array.from({ length: n }, (_, i) => ({
+    emoji: `${prefix}${'🎬'.repeat(i + 1)}`, a: [`${prefix} ${i + 1}`], cat: 'movie'
+}));
+
 const qa = (prefix, n = 2, extra = {}) => Array.from({ length: n }, (_, i) => ({
     q: `${prefix} question number ${i + 1}?`, a: [`${prefix}${i + 1}`], level: i % 2 ? 'hard' : 'easy', ...extra
 }));
@@ -31,6 +35,7 @@ function fakeGenerate(calls) {
             return words(['metronome', 'carousel', 'periscope', 'kaleidoscope', 'harmonica', 'trombone']
                 .slice((serial % 3) * 2, (serial % 3) * 2 + count));
         }
+        if (category === 'emoji') return emojis(`🧩${serial}`, count);
         return qa(`${category}${serial}`, count, category === 'math' ? { topic: 'linear' } : category === 'code' ? { topic: 'ds' } : {});
     };
 }
@@ -98,14 +103,14 @@ test('generateBatch is text-only, one category per request, falls back on failur
     }), /incomplete or invalid/);
 });
 
-test('first start fills all four pools, one sequential request each, alternating providers', async (t) => {
+test('first start fills every pool, one sequential request each, alternating providers', async (t) => {
     const file = disk(t);
     const calls = [];
     const store = createGameContentStore({ file, config, now: () => Date.UTC(2026, 8, 25), generate: fakeGenerate(calls), gapMs: 0 }).load();
     const out = await store.refreshIfStale();
     assert.deepEqual(out.refreshed, CATEGORIES);
     assert.deepEqual(calls.map((c) => c.category), CATEGORIES);
-    assert.deepEqual(calls.map((c) => c.turn), [0, 1, 2, 3], 'each batch starts at the next provider');
+    assert.deepEqual(calls.map((c) => c.turn), [0, 1, 2, 3, 4, 5], 'each batch starts at the next provider');
     for (const c of CATEGORIES) assert.equal(store.items(c).length, 2);
     assert.equal(createGameContentStore({ file, config }).load().items('math').length, 2, 'survives restart');
     store.close();
@@ -202,8 +207,8 @@ test('batches are spaced out by the gap timer', async (t) => {
         clearTimer: () => {}
     }).load();
     await store.refreshIfStale();
-    assert.equal(calls.length, 4);
-    assert.deepEqual(delays.filter((d) => d === 20_000).length, 3, 'a 20s gap between the four requests');
+    assert.equal(calls.length, 6);
+    assert.deepEqual(delays.filter((d) => d === 20_000).length, 5, 'a 20s gap between the six requests');
     store.close();
 });
 

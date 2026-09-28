@@ -14,7 +14,7 @@
  *   !game addq Q ; A                        owner — curate the trivia pool
  *   !game delete Q|# / !game listq         owner — delete / list trivia questions
  *   !game modify Q ; A                     owner — fix a trivia answer
- *   !guess <answer>  !in  !top               anyone — those games' shortcuts
+ *   !guess <answer>  !top                    anyone — those games' shortcuts
  *   !random !roll !flip !pick !shuffle !8ball  anyone — instant randomness
  *
  * parseCommand() is pure so the parsing rules are covered by tests.
@@ -42,7 +42,6 @@ const ALIASES = {
     // games — the engine understands these, commands.js only routes them
     game    : ['game', 'games', 'play'],
     guess   : ['guess', 'g', 'a', 'ans', 'answer'],
-    join    : ['in', 'join'],
     top     : ['top', 'scoreboard', 'scores', 'leaderboard', 'rank'],
 
     // instant randomness
@@ -316,10 +315,6 @@ export function createCommandHandler({ config, flags, log, guard, limiter, group
             case 'guess':
                 if (!games) return NO_GAMES;
                 return await games.guess(ctx, cmd.args);
-
-            case 'join':
-                if (!games) return NO_GAMES;
-                return await games.join(ctx);
 
             case 'top':
                 if (!games) return NO_GAMES;

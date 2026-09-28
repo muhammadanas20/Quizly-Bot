@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 
 import {
     randomInt, pickOne, shuffle, parseRange, parseDice, rollDice,
-    flipCoin, parseCoinCall, eightBall, parseOptions,
+    flipCoin, eightBall, parseOptions,
     createRandomTools, EIGHT_BALL
 } from '../src/random.js';
 
@@ -71,14 +71,6 @@ test('parseOptions splits commas and spaces', () => {
     assert.deepEqual(parseOptions(['apple,', 'banana', 'cake']), ['apple', 'banana cake']);
     assert.deepEqual(parseOptions(['pizza']), ['pizza']);
     assert.deepEqual(parseOptions([]), []);
-});
-
-test('parseCoinCall accepts the obvious spellings and rejects the rest', () => {
-    assert.equal(parseCoinCall('Heads'), true);
-    assert.equal(parseCoinCall('h'), true);
-    assert.equal(parseCoinCall('tails'), false);
-    assert.equal(parseCoinCall('T'), false);
-    assert.equal(parseCoinCall('maybe'), null);
 });
 
 // ── dice / coin / slots ──────────────────────────────────────────────────────

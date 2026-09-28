@@ -106,12 +106,13 @@ Game controls and question management: !game help
 🎮 *Pick a game*
 
 🔢 number — guess the number
-🪙 coin — heads or tails
+🧩 riddle — a tricky brain teaser
+🎭 emoji — decode the emoji rebus
+✊ rps — beat the bot's hidden hand
 ➗ math — solve a problem
 💻 code — programming challenges
 🔤 scramble — unscramble a word
 🧠 trivia — a little general knowledge
-🎁 lucky — join a draw
 
 Start with !game {name}
 Math/code: add easy or hard.
@@ -134,8 +135,6 @@ Wins earn game points; streaks can add a bonus.
 !game {name} — start
 !game mode easy|hard — default difficulty
 !game end — end your round
-!in — join a lucky draw
-!game draw — draw now
 !game status — availability and content
 
 *Scores*
@@ -209,12 +208,34 @@ Up to {points} pts · {duration}
 Each wrong guess reduces the reward by 1.
 ```
 
-**Coin**
+**Riddle**
 ```text
-🪙 *Heads or tails?*
+🧩 *Riddle me this*
 
-The coin is picked. What’s your call?
-Send heads or tails.
+{riddle}
+
+{points} pts · {duration}
+First correct answer wins.
+```
+
+**Emoji puzzle**
+```text
+🎭 *Emoji puzzle*
+
+{emoji string}
+_Category: {movie · phrase · thing · place · food}_
+
+{points} pts · {duration}
+Send the answer.
+```
+
+**Rock-Paper-Scissors**
+```text
+✊ *Rock · Paper · Scissors*
+
+The bot has already thrown its hand — in secret.
+Call *rock*, *paper* or *scissors*: only the hand that beats it wins.
+Two misses from one player and the hand is shown.
 
 {points} pts · {duration}
 ```
@@ -271,16 +292,6 @@ Send the original word.
 First correct answer wins.
 ```
 
-**Lucky draw**
-```text
-🎁 *You’re invited to a lucky draw*
-
-Send !in to join.
-{points} pts for the winner · Draw in {duration}
-
-!game draw to draw early.
-```
-
 ### 4. Answers, hints, round endings and validation
 
 | Reply or state | Proposed template |
@@ -293,11 +304,13 @@ Send !in to join.
 | Number guess | ↗️ Try higher · {warmth} / ↘️ Try lower · {warmth} |
 | Number narrowing hint | 💡 It’s between {low} and {high}. |
 | Letter hint | 💡 Starts with *{letter}*. {length detail when applicable} |
-| Coin hint | 💡 Your choices are heads or tails. |
+| Riddle hint | 💡 The answer starts with *{letter}*. |
+| Emoji hint | 💡 It is a {category} · the answer starts with *{letter}*. |
+| RPS hint | 💡 Rock beats Scissors · Paper beats Rock · Scissors beats Paper. |
 | Repeated guess | You’ve tried *{guess}* already. Try another. |
 | Attempts exhausted | You’ve used all {limit} guesses this round. Next round is yours to try. |
 | Invalid answer | {expected answer type}\nExample: {valid example} |
-| Both coin calls exhausted | 🪙 It was *{answer}*. No correct calls this round. |
+| Two RPS misses | ✊ Two misses — the bot threw *{hand}*. Nobody beat it. |
 | Timeout | ⏱️ *Time’s up*\nThe answer was *{answer}*.\n\n{existing participation summary, if any} |
 | Ended by starter | *Round ended*\nThe answer was *{answer}*.\n{existing score summary, if any} |
 | No round | No round running here. Start one with !game. |
@@ -308,13 +321,6 @@ Send !in to join.
 | Games stopped during round setup | Games were paused before this round started. Try again when games reopen. |
 | Games disabled/unavailable | 🌙 Games are unavailable right now. {owner reopening command only when applicable} |
 | No stop permission | Only {starter} or the bot owner can end this round. |
-| Join draw | 🎟️ You’re in, {name}!\n{count} joined · Draw in {seconds}s |
-| Already joined | You’re already in, {name}. {count} players have joined. |
-| No draw | No draw open here. Start one with !game lucky. |
-| Draw ended | That draw has ended. Start another with !game lucky. |
-| Draw winner | 🎉 *Lucky pick: {name}*\n+{actual points} pts · {count} entrants\n{actual score summary} |
-| Empty draw | 🎁 Draw closed — nobody joined this time. |
-| Auto-joined starter | 🎟️ You’re in, {name}. {count} joined. |
 
 ### 5. Leaderboard and player card
 
