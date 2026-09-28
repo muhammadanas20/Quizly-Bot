@@ -21,7 +21,7 @@
  *   !game listemoji            owner: list the added emoji puzzles
  *   !game restore              owner: bring back hidden built-ins, clear modified answers
  *
- * Eight games: number, riddle, emoji, rps, math, code, scramble, trivia.
+ * Nine games: number, riddle, emoji, rps, math, code, scramble, trivia, react.
  * Everyone plays, everyone scores (every attempt earns a participation point),
  * and the scoreboard is per group so a big group's leaderboard means something.
  *
@@ -432,8 +432,8 @@ export const GAMES = Object.freeze([
     {
         name: 'react', aliases: ['react', 'reaction', 'reactrace', 'emojirace', 'reflex', 'speedreact', 'fastreact', 'emoji-race', 'react-race', 'reflexrace'], emoji: '⚡', mode: 'race',
         title: 'Reaction Race', points: GAME_POINTS.react,
-        how: '!game react → react with the same emoji first',
-        blurb: 'Bot drops a random emoji — first to react with it wins! 8 pts. Works with any emoji.'
+        how: '!game react → react to the bot’s emoji with the same emoji',
+        blurb: 'Bot posts one random emoji — react to that message with the same emoji to win! 8 pts.'
     }
 ]);
 
@@ -969,7 +969,9 @@ export function createGameEngine({
                 lastReact.set(ctx.jid, { at: now(), value: emoji });
                 return {
                     round,
-                    text: `${game.emoji} *Reaction Race* — ${game.points} pts\n\nReact to THIS message with ${emoji} as fast as you can!\nFirst to react with the same emoji wins.\n\nYou can also just send ${emoji} in chat if reactions are tricky.${tail.replace('Send your answer.', 'React with ' + emoji + ' to win!')}`
+                    // Keep the prompt itself textless: players react directly to
+                    // this emoji, and the router records this message ID for the race.
+                    text: emoji
                 };
             }
 

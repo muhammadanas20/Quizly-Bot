@@ -334,6 +334,26 @@ test('!game rps: a repeated hand is a nudge, two misses close and reveal', async
     assert.equal((await games.handleMessage(asAli('p'))).handled, true, 'p is a paper call');
 });
 
+test('!game react posts only its target emoji and announces the matching reaction', async () => {
+    const { games } = world({ random: () => 0 });
+    const start = await games.handle(asAli('!game react'), ['react']);
+    const round = games.active(GROUP);
+
+    assert.equal(start.reply, round.targetEmoji, 'the prompt has no instructions or other text');
+    assert.equal(start.reply, '😀');
+    assert.equal(round.botMessageId, null);
+    assert.equal(games.setBotMessageId(GROUP, 'BOT-REACT-1'), true);
+
+    const wrong = await games.handleReaction(asSana(''), { emoji: '🙃', targetId: 'BOT-REACT-1' });
+    assert.equal(wrong.wrong, true);
+    assert.ok(games.active(GROUP), 'a wrong reaction leaves the round open');
+
+    const win = await games.handleReaction(asAli(''), { emoji: round.targetEmoji, targetId: 'BOT-REACT-1' });
+    assert.equal(win.react, '🎉');
+    assert.match(win.reply, /Lightning fast, Ali/);
+    assert.equal(games.active(GROUP), null);
+});
+
 // ── math, scramble, trivia ───────────────────────────────────────────────────
 test('!game math asks a random sum and the first right answer takes it', async () => {
     const { games } = world();
