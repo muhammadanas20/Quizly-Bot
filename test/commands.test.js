@@ -56,14 +56,13 @@ test('!help advertises the games, the score commands and the randomness', async 
     const { handler, ctx } = world({ isOwner: false });
     const out = await handler.handle(ctx('!help'));
 
-    assert.match(out.reply, /Games — everyone can play/);
+    assert.match(out.reply, /\*Play\*/);
     assert.match(out.reply, /!game /);
-    assert.match(out.reply, /!guess/);
+    assert.match(out.reply, /!game help/);
     assert.match(out.reply, /!top/);
     assert.match(out.reply, /!8ball/);
-    assert.match(out.reply, /Owner only/);
-    assert.match(out.reply, /!game on/);
-    assert.match(out.reply, /!game reset tops/);
+    assert.match(out.reply, /Owner tools/);
+    assert.match(out.reply, /Game controls and question tools: !game help/);
 });
 
 test('game commands answer politely when the games are switched off', async () => {
@@ -71,7 +70,7 @@ test('game commands answer politely when the games are switched off', async () =
     for (const text of ['!game', '!guess 42', '!in', '!top']) {
         const out = await handler.handle(ctx(text));
         assert.equal(out.handled, true, text);
-        assert.match(out.reply, /Games are not enabled|not enabled on this bot/);
+        assert.match(out.reply, /Games aren’t available/);
     }
 });
 
@@ -126,7 +125,7 @@ test('owner-only commands are refused for everyone else', async () => {
     for (const name of OWNER_ONLY) {
         const out = await handler.handle(ctx(`!${name}`));
         assert.equal(out.handled, true);
-        assert.match(out.reply, /Only the bot owner/);
+        assert.match(out.reply, /This command is for the bot owner/);
         assert.equal(out.react, '⛔', 'the refusal is confirmed on the message itself');
     }
 });
@@ -144,7 +143,7 @@ test('!flag and !unflag both confirm with a reaction on the command message', as
 
     const missed = await handler.handle(ctx('!unflag 923009876543'));
     assert.equal(missed.react, 'ℹ️', 'a no-op still answers, so silence never means "maybe"');
-    assert.match(missed.reply, /Not flagged/);
+    assert.match(missed.reply, /No media filter for/);
 });
 
 // ── identity handling (the LID / phone-number split) ─────────────────────────
@@ -164,7 +163,7 @@ test('!flag by @mention stores the phone number too, so the guard and !unflag ag
 
     // and !unflag by the plain number now finds it
     const out = await handler.handle(ctx('!unflag 923009876543'));
-    assert.match(out.reply, /Unflagged/);
+    assert.match(out.reply, /Media filter removed for/);
     assert.equal(flags.has(new Set(['219537588899977@lid'])), false);
 });
 
@@ -175,7 +174,7 @@ test('!flag by @mention labels the entry with the member name, not the raw LID',
         expandIds: (raw) => [raw]
     }));
 
-    assert.match(out.reply, /Flagged Muhammad Anas/);
+    assert.match(out.reply, /Media filter added\*\nMuhammad Anas/);
     const entry = flags.find(new Set(['219537588899977@lid'])).entry;
     assert.equal(entry.label, 'Muhammad Anas');
     // the mention's display name must not be swallowed into the reason
@@ -187,7 +186,7 @@ test('!flag adds a member by typed number and confirms', async () => {
     const out = await handler.handle(ctx('!flag 923009876543 spamming stickers'));
     assert.equal(out.handled, true);
     assert.equal(flags.has(new Set(['923009876543'])), true);
-    assert.match(out.reply, /Flagged 923009876543/);
+    assert.match(out.reply, /Media filter added\*\n923009876543/);
     assert.equal(flags.find(new Set(['923009876543'])).entry.reason, 'spamming stickers');
 });
 
@@ -195,13 +194,13 @@ test('!flag works from an @mention', async () => {
     const { handler, flags, ctx } = world();
     const out = await handler.handle(ctx('!flag', { mentioned: ['923009876543@s.whatsapp.net'] }));
     assert.equal(flags.has(new Set(['923009876543'])), true);
-    assert.match(out.reply, /Flagged/);
+    assert.match(out.reply, /Media filter added/);
 });
 
 test('!flag without a target explains the usage', async () => {
     const { handler, ctx } = world();
     const out = await handler.handle(ctx('!flag'));
-    assert.match(out.reply, /Usage: !flag/);
+    assert.match(out.reply, /Try it like this: !flag/);
 });
 
 test('!flag with media= overrides the global media setting for that person', async () => {
@@ -228,7 +227,7 @@ test('!flags lists people and how much was removed', async () => {
 
 test('!flags with nobody flagged says so', async () => {
     const { handler, ctx } = world();
-    assert.match((await handler.handle(ctx('!flags'))).reply, /Nobody is flagged/);
+    assert.match((await handler.handle(ctx('!flags'))).reply, /No members have a media filter/);
 });
 
 test('!unflag removes and reports misses', async () => {
@@ -236,8 +235,8 @@ test('!unflag removes and reports misses', async () => {
     flags.add(new Set(['923009876543']), { label: 'Ali' });
     const out = await handler.handle(ctx('!unflag 923009876543 923000000000'));
     assert.equal(flags.has(new Set(['923009876543'])), false);
-    assert.match(out.reply, /Unflagged 923009876543/);
-    assert.match(out.reply, /Not flagged: 923000000000/);
+    assert.match(out.reply, /Media filter removed for 923009876543/);
+    assert.match(out.reply, /No media filter for: 923000000000/);
 });
 
 test('!guard toggles the live setting', async () => {
@@ -247,8 +246,8 @@ test('!guard toggles the live setting', async () => {
     assert.equal(config.guardEnabled, false);
     assert.match((await handler.handle(ctx('!guard on'))).reply, /now ON/);
     assert.equal(config.guardEnabled, true);
-    assert.match((await handler.handle(ctx('!guard status'))).reply, /Guard is ON/);
-    assert.match((await handler.handle(ctx('!guard wibble'))).reply, /Usage/);
+    assert.match((await handler.handle(ctx('!guard status'))).reply, /Media guard is ON/);
+    assert.match((await handler.handle(ctx('!guard wibble'))).reply, /Try it like this/);
 });
 
 test('!quiz delegates to the solver', async () => {
@@ -261,11 +260,11 @@ test('!quiz delegates to the solver', async () => {
 
 test('!ping and !stats report memory and counters', async () => {
     const { handler, ctx } = world();
-    assert.match((await handler.handle(ctx('!ping'))).reply, /pong · \d+ MB RSS/);
+    assert.match((await handler.handle(ctx('!ping'))).reply, /Memory: \d+ MB/);
     const stats = (await handler.handle(ctx('!stats'))).reply;
     assert.match(stats, /Guard: ON/);
     assert.match(stats, /Removed this session: 3/);
-    assert.match(stats, /Top offenders: Ali \(3\)/);
+    assert.match(stats, /Most filtered: Ali \(3\)/);
     assert.match(stats, /Memory: \d+ MB/);
 });
 
@@ -275,5 +274,5 @@ test('a non-command returns handled:false so the quiz path still runs', async ()
 });
 
 test('HELP_TEXT mentions the silent-delete behaviour', () => {
-    assert.match(HELP_TEXT, /never replies in the group/);
+    assert.match(HELP_TEXT, /guard stays silent/);
 });

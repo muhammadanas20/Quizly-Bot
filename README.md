@@ -21,30 +21,54 @@ Send in a group:
 The bot reacts 👀 to your message, then posts:
 
 ```
-*Quiz solved* · 3 questions
+📝 *Quiz answers · 3 questions*
 
 *Q1.* Which gas do plants absorb for photosynthesis?
-💡 Photosynthesis fixes carbon from CO₂ into sugar.
+Photosynthesis fixes carbon from CO₂ into sugar.
 ✅ *B — Carbon dioxide*
 
 *Q2.* Capital of Pakistan?
-💡 Islamabad replaced Karachi as capital in the 1960s.
+Islamabad replaced Karachi as capital in the 1960s.
 ✅ *C — Islamabad*
 
 *Q3.* 12 × 8 = ?
-💡 12 × 8 = 96.
+12 × 8 = 96.
 ✅ *A — 96*
 
-━━ *Answer key* ━━
+*Answer key*
 1) B — Carbon dioxide
 2) C — Islamabad
 3) A — 96
-
-_groq · meta-llama/llama-4-scout-17b-16e-instruct · 1.2s_
 ```
 
 then flips your message to ✅. Every question is read, given a one-line reason, and
 answered before the next one starts — exactly the order you asked for.
+
+---
+
+## Clean chat layout and data structures
+
+Replies use short headings, whitespace and a few meaningful emojis. Detailed controls
+live in `!game help`, not a large monospace command table. Quiz replies keep the
+question → reason → answer order and answer key, while provider/model/timing details
+stay in server logs. Missing answers and incomplete screenshots stay visibly flagged.
+
+The code game now includes **48 built-in data-structure questions**: the original 18
+plus **30 new exercises (15 easy, 15 hard)** covering arrays, linked lists, stacks,
+queues, trees, BSTs, heaps, hashing and graphs. Operation traces use short pseudocode
+blocks separated from the question text.
+
+- `!game code easy ds` — an easy DS round
+- `!game code hard ds` — a harder DS round
+- `!game help` — all commands, including owner tools
+
+The new questions are in `src/ds-questions.js`, included by `src/banks.js`.
+Entries may carry an optional `code` field; `src/presentation.js` renders it in
+WhatsApp monospace without language tags. Question prose stays outside the block.
+Scoring, permissions and the silent media guard are unchanged.
+
+See [message examples](docs/MESSAGE-EXAMPLES.md) for actual rendered replies, and
+[the approved design catalog](docs/MESSAGE-STYLE-PREVIEW.md) for the original options.
 
 ---
 
@@ -141,7 +165,7 @@ only the starter or owner may replace a round while it is still running.
 into the trivia pool (`/` separates accepted spellings) — it is drawn alongside the
 built-in questions from then on. **Only you can add questions:** a number in
 `OWNER_NUMBERS`, or the bot's own account. Any other member who tries it gets a single
-⛔ reaction and `Only the bot owner can use that command.`, and their text never reaches
+⛔ reaction and `This command is for the bot owner.`, and their text never reaches
 the pool. The gate answers before the games switch, so it reads the same whether games
 are on or off. The first ten questions you add are still worth +2 points each:
 

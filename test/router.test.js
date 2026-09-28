@@ -142,7 +142,7 @@ test('router: !flag typed on the bot\'s own account still flags, and confirms wi
     assert.deepEqual(res, { command: 'flag' });
     assert.equal(flags.has(new Set(['923009876543'])), true);
     assert.deepEqual(reacts(), ['🚩'], 'the reaction is the confirmation');
-    assert.match(sent.find((s) => s.content.text).content.text, /Flagged 923009876543/);
+    assert.match(sent.find((s) => s.content.text).content.text, /Media filter added\*\n923009876543/);
 });
 
 test('router: !unflag typed on the bot\'s own account still unflags', async () => {
@@ -153,7 +153,7 @@ test('router: !unflag typed on the bot\'s own account still unflags', async () =
 
     assert.equal(flags.has(new Set(['923009876543'])), false);
     assert.deepEqual(reacts(), ['✅']);
-    assert.match(texts()[0], /Unflagged 923009876543/);
+    assert.match(texts()[0], /Media filter removed for 923009876543/);
 });
 
 test('router: !flag by @mention from the bot\'s own account resolves the mention', async () => {
@@ -169,7 +169,7 @@ test('router: the bot\'s own quiz trigger never re-solves its own answer', async
         key    : { remoteJid: GROUP, participant: BOT, fromMe: true, id: 'OWN2' },
         message: {
             extendedTextMessage: {
-                text       : '*Quiz solved* · 1 question',
+                text       : '*Quiz answers* · 1 question',
                 contextInfo: { stanzaId: 'Q1', quotedMessage: { imageMessage: { url: 'u' } } }
             }
         }
@@ -299,7 +299,7 @@ test('router: the owner can flag someone mid-conversation', async () => {
     }));
 
     assert.equal(flags.has(new Set(['923009876543'])), true);
-    assert.match(texts()[0], /Flagged 923009876543/);
+    assert.match(texts()[0], /Media filter added\*\n923009876543/);
 
     // and the very next sticker from that person disappears
     await router.processMessage(sticker());
@@ -310,7 +310,7 @@ test('router: a non-owner is refused', async () => {
     const { router, flags, texts } = world();
     await router.processMessage(msg({ message: { conversation: '!flag 923009876543' } }));
     assert.equal(flags.count, 0);
-    assert.match(texts()[0], /Only the bot owner/);
+    assert.match(texts()[0], /This command is for the bot owner/);
 });
 
 test('router: a throwing command is reported, not swallowed', async () => {
@@ -330,9 +330,9 @@ test('router: "quiz" + image answers with question → reason → answer', async
     const res = await router.processMessage(quizMsg());
 
     assert.equal(res.quiz.ok, true);
-    const body = texts().find((t) => t.includes('Quiz solved'));
+    const body = texts().find((t) => t.includes('Quiz answers'));
     assert.match(body, /\*Q1\.\* Capital of Pakistan\?/);
-    assert.match(body, /💡 Islamabad replaced Karachi in the 1960s\./);
+    assert.match(body, /Islamabad replaced Karachi in the 1960s\./);
     assert.match(body, /✅ \*B — Islamabad\*/);
     assert.deepEqual(reacts(), ['👀', '✅']);
 });
@@ -354,7 +354,7 @@ test('router: an image with no trigger word does nothing', async () => {
 test('router: the configured trigger word is respected', async () => {
     const { router, texts } = world({ env: { QUIZ_TRIGGER: 'solve' } });
     await router.processMessage(msg({ message: { imageMessage: { url: 'u', mimetype: 'image/jpeg', caption: 'solve this' } } }));
-    assert.ok(texts().some((t) => t.includes('Quiz solved')));
+    assert.ok(texts().some((t) => t.includes('Quiz answers')));
 });
 
 test('router: in a private chat the quiz still works but the guard does not', async () => {
@@ -373,7 +373,7 @@ test('router: in a private chat the quiz still works but the guard does not', as
         key    : { remoteJid: TARGET, fromMe: false, id: 'D2' },
         message: { imageMessage: { url: 'u', mimetype: 'image/jpeg', caption: 'quiz' } }
     }));
-    assert.ok(texts().some((t) => t.includes('Quiz solved')));
+    assert.ok(texts().some((t) => t.includes('Quiz answers')));
 });
 
 test('router: a failing AI is reported to the group', async () => {
@@ -414,7 +414,7 @@ test('router: !game starts a round and a bare number from another member wins it
     }));
     assert.deepEqual(b, { game: true });
     assert.equal(reacts().pop(), '🎉');
-    assert.match(texts().pop(), /wins! the number was \*51\*/);
+    assert.match(texts().pop(), /Nice one, .*\nthe number was \*51\*/);
     assert.equal(games.active(GROUP), null);
     assert.equal(scores.board(GROUP).length, 2, 'both members are on the board');
 });
@@ -427,7 +427,7 @@ test('router: a quiz screenshot still reaches the solver while a round is runnin
 
     const res = await router.processMessage(quizMsg());
     assert.equal(res.quiz.ok, true, 'the quiz trigger wins over the game');
-    assert.ok(texts().some((t) => t.includes('Quiz solved')));
+    assert.ok(texts().some((t) => t.includes('Quiz answers')));
     assert.ok(games.active(GROUP), 'and it does not end the round');
 });
 
@@ -465,10 +465,10 @@ test('router: !guess, !top and the instant random commands are all reachable', a
     await router.processMessage(msg({ message: { conversation: '!game trivia' } }));
     await router.processMessage(msg({ message: { conversation: '!guess London' } }));
     assert.equal(lastReact(), '❌');
-    assert.match(lastText(), /London is not it/, 'an explicit wrong guess gets a one-liner');
+    assert.match(lastText(), /Not quite — try again/, 'an explicit wrong guess gets a one-liner');
 
     await router.processMessage(msg({ message: { conversation: '!roll 2d6' } }));
-    assert.match(texts().pop(), /2d6 → 4 \+ 4 = \*8\*/);
+    assert.match(texts().pop(), /🎲 \*8\*\n2d6: 4 \+ 4/);
 
     await router.processMessage(msg({ message: { conversation: '!random 1-100' } }));
     assert.match(texts().pop(), /\*51\*/);
@@ -481,14 +481,14 @@ test('router: !guess, !top and the instant random commands are all reachable', a
     assert.match(stopped, /Next round: `!game trivia`/, 'the starter can end their own round');
 
     await router.processMessage(msg({ message: { conversation: '!top' } }));
-    assert.match(texts().pop(), /Top players — Study Group/);
+    assert.match(texts().pop(), /Leaderboard · Study Group/);
 });
 
 test('router: a lucky draw is played with !game lucky, !in and !game draw', async () => {
     const { router, texts, scores } = world();
 
     await router.processMessage(msg({ message: { conversation: '!game lucky' } }));
-    assert.match(texts().pop(), /Ali is in|is in!/);
+    assert.match(texts().pop(), /You’re in,/);
 
     await router.processMessage(msg({
         key    : { remoteJid: GROUP, participant: OTHER, fromMe: false, id: 'L2' },
@@ -498,7 +498,7 @@ test('router: a lucky draw is played with !game lucky, !in and !game draw', asyn
 
     await router.processMessage(msg({ message: { conversation: '!game draw' } }));
     const drawn = texts().pop();
-    assert.match(drawn, /wins the lucky draw/);
+    assert.match(drawn, /Lucky pick:/);
     assert.equal(scores.board(GROUP).length, 2, 'every entrant earned a point');
     assert.equal(scores.boardAll()[0].points >= 8, true);
 });
@@ -508,7 +508,7 @@ test('router: an unknown "!game chess" answers instead of going quiet', async ()
     const res = await router.processMessage(msg({ message: { conversation: '!game chess' } }));
     assert.deepEqual(res, { command: 'game' });
     assert.equal(lastReact(), '⚠️');
-    assert.match(texts().pop(), /do not know the game/);
+    assert.match(texts().pop(), /isn’t on the list/);
 });
 
 test('router: a bot-authored game message is never treated as a guess', async () => {
@@ -535,17 +535,17 @@ test('router: owner global stop/reset via WhatsApp, member cannot operate them',
     assert.equal(games.roundCount, 2);
 
     await router.processMessage(msg({ message: { conversation: '!game reset tops' } }));
-    assert.match(texts().at(-1), /Only the bot owner/);
+    assert.match(texts().at(-1), /This command is for the bot owner/);
     await router.processMessage(ownCmd('!game stop'));
     assert.equal(games.roundCount, 0);
     assert.equal(games.enabled, false);
-    assert.match(texts().at(-1), /Games are OFF/);
+    assert.match(texts().at(-1), /Games are OFF|Games are paused/);
     assert.ok(sent.some((s) => s.jid === other && /cancelled/.test(s.content.text)));
 
     await router.processMessage(msg({ message: { conversation: '!game on' } }));
-    assert.match(texts().at(-1), /Only the bot owner/);
+    assert.match(texts().at(-1), /This command is for the bot owner/);
     await router.processMessage(msg({ message: { conversation: '!guess 51' } }));
-    assert.match(texts().at(-1), /Games are OFF/);
+    assert.match(texts().at(-1), /Games are OFF|Games are paused/);
     assert.equal(scores.playerOf(other, ['923009876543']).points, 1);
     await router.processMessage(ownCmd('!game reset tops'));
     assert.equal(scores.playerCount, 0);
@@ -559,7 +559,7 @@ test('router: owner global stop/reset via WhatsApp, member cannot operate them',
 test('router: !game on works even if GAMES=off at startup', async () => {
     const { router, games, texts } = world({ env: { GAMES: 'off' } });
     await router.processMessage(msg({ message: { conversation: '!game coin' } }));
-    assert.match(texts().at(-1), /Games are OFF/);
+    assert.match(texts().at(-1), /Games are OFF|Games are paused/);
     await router.processMessage(ownCmd('!game on'));
     assert.equal(games.enabled, true);
     await router.processMessage(msg({ message: { conversation: '!game coin' } }));

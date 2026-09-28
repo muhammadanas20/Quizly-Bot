@@ -95,21 +95,21 @@ test('solve: sends every question as question → reason → answer, in order', 
     assert.equal(res.questions, 2);
     assert.equal(res.provider, 'gemini');
 
-    const answerMsg = sent.find((s) => s.content.text?.includes('Quiz solved'));
+    const answerMsg = sent.find((s) => s.content.text?.includes('Quiz answers'));
     assert.ok(answerMsg, 'an answer message must be sent');
 
     const body = answerMsg.content.text;
     assert.match(body, /\*Q1\.\* Capital of Pakistan\?/);
-    assert.match(body, /💡 Islamabad became the capital in the 1960s\./);
+    assert.match(body, /Islamabad became the capital in the 1960s\./);
     assert.match(body, /✅ \*B — Islamabad\*/);
-    assert.match(body, /━━ \*Answer key\* ━━/);
+    assert.match(body, /\*Answer key\*/);
 
     // strict ordering: reason and answer of Q1 come before Q2 starts
-    assert.ok(body.indexOf('*Q1.*') < body.indexOf('💡 Islamabad'));
-    assert.ok(body.indexOf('💡 Islamabad') < body.indexOf('✅ *B — Islamabad*'));
+    assert.ok(body.indexOf('*Q1.*') < body.indexOf('Islamabad'));
+    assert.ok(body.indexOf('Islamabad') < body.indexOf('✅ *B — Islamabad*'));
     assert.ok(body.indexOf('✅ *B — Islamabad*') < body.indexOf('*Q2.*'));
-    assert.ok(body.indexOf('*Q2.*') < body.indexOf('💡 The Pacific'));
-    assert.ok(body.indexOf('💡 The Pacific') < body.indexOf('✅ *C — Pacific*'));
+    assert.ok(body.indexOf('*Q2.*') < body.indexOf('The Pacific'));
+    assert.ok(body.indexOf('The Pacific') < body.indexOf('✅ *C — Pacific*'));
 });
 
 test('solve: reacts 👀 while working and ✅ when done', async () => {
@@ -184,7 +184,7 @@ test('solve: download failure tells the user instead of going silent', async () 
     const { quiz, sent } = world({ fetchImpl: okFetch(), downloadImpl: async () => { throw new Error('media expired'); } });
     const res = await quiz.solve(imageMsg(), { isGroup: true });
     assert.equal(res.ok, false);
-    assert.match(sent.find((s) => s.content.text).content.text, /Could not download/);
+    assert.match(sent.find((s) => s.content.text).content.text, /didn’t download/);
 });
 
 test('solve: no image found is explained', async () => {
@@ -223,7 +223,7 @@ test('solve: an answer cut off by the token limit is still formatted, with a war
     assert.equal(res.ok, true);
     assert.equal(res.questions, 2, 'the two complete questions survive');
 
-    const body = sent.find((s) => s.content.text?.includes('Quiz solved')).content.text;
+    const body = sent.find((s) => s.content.text?.includes('Quiz answers')).content.text;
     assert.match(body, /\*Q1\.\* Capital of Pakistan\?/);
     assert.match(body, /✅ \*C — Pacific\*/);
     assert.match(body, /output limit/, 'the user is told the answer was cut short');
@@ -236,7 +236,7 @@ test('solve: a model that finds no question gets a readable reply, not raw JSON'
 
     assert.equal(res.ok, false);
     const body = sent.find((s) => s.content.text).content.text;
-    assert.match(body, /Could not read any question/);
+    assert.match(body, /couldn’t read the questions/);
     assert.ok(!body.includes('{'), 'the empty JSON must not be posted to the group');
     assert.deepEqual(sent.filter((s) => s.content.react).map((s) => s.content.react.text), ['👀', '❌']);
 });
@@ -269,7 +269,7 @@ test('solve: a huge answer is split into several messages', async () => {
 
     // every single answer must survive the split
     const joined = texts.join('\n');
-    assert.match(joined, /━━ \*Answer key\* ━━/);
+    assert.match(joined, /\*Answer key\*/);
     for (let i = 1; i <= 60; i++) {
         assert.ok(joined.includes(`${i}) `), `answer ${i} was lost while chunking`);
     }

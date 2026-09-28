@@ -129,14 +129,14 @@ export function createQuizHandler({ sock, config, log, limiter, inflight, downlo
             try {
                 raw = await grabImage(msg);
             } catch (err) {
-                await sock.sendMessage(jid, { text: '❌ Could not download that image. Send it again as a photo or screenshot.' });
+                await sock.sendMessage(jid, { text: '📷 That photo didn’t download. Please send it again as a screenshot.' });
                 log.warn(`quiz: download failed in "${chatName}": ${err.message}`);
                 await react(msg, '❌');
                 return { ok: false, error: err.message };
             }
 
             if (!raw || !raw.length) {
-                await sock.sendMessage(jid, { text: '❌ No readable image found. Attach a screenshot of the quiz, or reply to one with the trigger word.' });
+                await sock.sendMessage(jid, { text: '📷 No readable image found. Send a quiz screenshot, or reply to one with !quiz.' });
                 await react(msg, '❌');
                 return { ok: false, error: 'no image' };
             }
@@ -152,8 +152,8 @@ export function createQuizHandler({ sock, config, log, limiter, inflight, downlo
             if (!result.ok) {
                 await sock.sendMessage(jid, {
                     text:
-                        `❌ *Could not solve that quiz.*\n${result.summary}\n\n` +
-                        '💡 A crisp, uncropped screenshot works best.'
+                        `⚠️ *I couldn’t solve this one.*\n${result.summary}\n\n` +
+                        'Try again with a clear, uncropped screenshot.'
                 });
                 await react(msg, '❌');
                 return { ok: false, error: result.summary };
@@ -177,8 +177,8 @@ export function createQuizHandler({ sock, config, log, limiter, inflight, downlo
                 if (parsed.questions.length === 0 && parsed.unreadable.length) {
                     await sock.sendMessage(jid, {
                         text:
-                            `🤔 *Could not read any question in that image.*\n${parsed.unreadable.join(' · ')}\n\n` +
-                            '💡 A sharper, uncropped screenshot works best.'
+                            `📷 *I couldn’t read the questions.*\n${parsed.unreadable.join(' · ')}\n\n` +
+                            'Please send a sharper, uncropped screenshot.'
                     });
                     await react(msg, '❌');
                     log.warn(`quiz: no readable question in "${chatName}" via ${result.provider}`);
@@ -186,7 +186,7 @@ export function createQuizHandler({ sock, config, log, limiter, inflight, downlo
                 }
 
                 // The model answered but not in a usable shape — never drop it.
-                const fallback = `*Quiz solved* (${result.provider})\n\n${result.text}`.slice(0, 3800);
+                const fallback = `📝 *Quiz response*\n\n${result.text}`.slice(0, 3800);
                 await sendChunks(jid, fallback, msg.key);
                 await react(msg, '✅');
                 log.warn(`quiz: unparsed model output in "${chatName}" — sent raw text`);

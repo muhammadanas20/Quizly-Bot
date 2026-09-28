@@ -33,6 +33,8 @@
  * socket, in keeping with the rest of this codebase.
  */
 
+import { questionText, roundCard, GAME_GUIDE } from './presentation.js';
+
 import { randomInt, pickOne, shuffle, parseRange, parseCoinCall } from './random.js';
 import { MATH_BANK, CODE_BANK, parseTopic } from './banks.js';
 import { normalizeId } from './config.js';
@@ -521,43 +523,31 @@ export function createGameEngine({
 
     // ── rendering ────────────────────────────────────────────────────────────
     function listText() {
-        const lines = [`🎮 *Games* — ${enabled ? 'everyone can play, everyone earns points' : 'OFF (owner: !game on)'}`, ''];
-        GAMES.forEach((g, i) => {
-            lines.push(`${i + 1}. ${g.emoji} *${g.name}* — ${g.blurb}`);
-            lines.push(`   \`${g.how}\``);
-        });
-        lines.push(
-            '',
-            '*Scores & more*',
-            '```',
-            '!game top        leaderboard of this chat',
-            '!game top all    leaderboard across all chats',
-            '!game me         your own score card',
-            '!game end        starter: end this chat’s round',
-            '!game status     games on/off + rotating question counts',
-            '!game mode easy|hard  math + code level for this chat',
-            '```',
-            `_Owner: !game on · !game stop (all chats) · !game reset tops (all boards) · !game reset @member [all] · !game addq Q ; A (+${CONTRIBUTION_POINTS} pts) · !game delete Q · !game modify Q ; A · !game listq_`,
-            `Quick random: !random [n|1-100|a, b, c] · !roll 2d6 · !flip · !pick a, b · !shuffle a, b · !8ball <question>`
-        );
-        return lines.join('\n');
+        return [
+            '🎮 *Pick a game*',
+            enabled ? '' : '🌙 Games are paused. Owner: !game on',
+            ...GAMES.map((g) => `${g.emoji} *${g.name}* — ${g.blurb}`), '',
+            'Start with !game <name>',
+            'Math/code: add easy or hard.',
+            'Code topics: pf · oop · ds · coal',
+            'Math topics: linear · calc · mvc · arith', '',
+            'Example: !game code easy ds',
+            '!top for scores · !game help for rules and controls'
+        ].join('\n');
     }
 
     function helpText() {
-        const lines = ['📖 *How to play*', ''];
-        for (const g of GAMES) {
-            lines.push(`${g.emoji} *${g.name}* — ${g.title} · ${g.points} pts`);
-            lines.push(`  \`${g.how}\``);
-            lines.push(`  ${g.blurb}`);
-            lines.push('');
-        }
-        lines.push(
-            'Everyone who takes part is on the scoreboard; the first right answer',
-            'wins the round, and wrong guesses get hints. One game per chat at a',
-            'time — the round also ends by itself if nobody finds it in time.',
-            'The built-in pool, contributed questions and a daily rotating AI pool keep rounds fresh.'
-        );
-        return lines.join('\n');
+        return [
+            '🎮 *How to play*', '',
+            'Send an answer, or use !guess <answer>.',
+            'The first correct answer wins. One round per chat.',
+            'Your first eligible attempt earns a participation point.',
+            'Wins earn game points; streaks can add a bonus.', '',
+            ...GAMES.map((g) => `${g.emoji} *${g.name}* · ${g.points} pts\n${g.how}`), '',
+            'Math/code hard mode pays 10 pts. Number rewards fall with wrong guesses.',
+            'Rounds end when time runs out. Wrong guesses may get hints.', '',
+            GAME_GUIDE
+        ].join('\n');
     }
 
     function medal(i) {
@@ -569,14 +559,14 @@ export function createGameEngine({
         const rows = all ? scores?.boardAll(12) : scores?.board(ctx.jid, 12);
         if (!rows?.length) {
             return all
-                ? '🏆 Nobody has played yet. Start a round: *!game*'
-                : '🏆 Nobody here has played yet. Start a round: *!game*';
+                ? '🏆 No scores yet. Start a round with !game.'
+                : '🏆 No scores here yet. Start a round with !game.';
         }
         const { players, points: total } = all
             ? { players: rows.length, points: rows.reduce((n, r) => n + r.points, 0) }
             : scores.totals(ctx.jid);
 
-        const head = all ? '🏆 *Top players (all chats)*' : `🏆 *Top players — ${ctx.chatName || 'this chat'}*`;
+        const head = all ? '🏆 *Leaderboard · All chats*' : `🏆 *Leaderboard · ${ctx.chatName || 'This chat'}*`;
         const lines = rows.map((r, i) => {
             const name = r.name || String(r.key).replace(/@.*/, '');
             const streak = r.streak > 1 ? ` · 🔥${r.streak}` : '';
@@ -584,7 +574,7 @@ export function createGameEngine({
             return `${medal(i)} ${name} — ${pt(r.points)} · ${r.wins} win${r.wins === 1 ? '' : 's'}${streak}${chats}`;
         });
         lines.push('', `_${players} player${players === 1 ? '' : 's'} · ${total} points${all ? ' total' : ''}_`);
-        return [head, ...lines].join('\n');
+        return [head, '', ...lines].join('\n');
     }
 
     function meText(ctx) {
@@ -592,12 +582,12 @@ export function createGameEngine({
         const rows = scores?.board(ctx.jid, Number.MAX_SAFE_INTEGER) || [];
         const row = rows.find((r) => r.key === key);
         if (!row) {
-            return '👤 You are not on the board yet — join a round with *!game* and take a guess.';
+            return '👋 Your score starts with your first guess. Join a round with !game.';
         }
         const name = row.name || String(row.key).replace(/@.*/, '');
         const rank = rows.findIndex((r) => r.key === key) + 1;
         return [
-            `👤 *${name}*`,
+            `👤 *${name}’s score*\n`,
             `${pt(row.points)} · ${row.wins} win${row.wins === 1 ? '' : 's'} in ${row.played} round${row.played === 1 ? '' : 's'}`,
             `Rank #${rank} of ${rows.length} here${row.best > 1 ? ` · best streak ${row.best}` : ''}`
         ].join('\n');
@@ -626,7 +616,7 @@ export function createGameEngine({
     function build(ctx, game, args, starterKey, starterLabel) {
         const round = newRound(ctx, game, starterKey, starterLabel);
         const left = Math.round(timeoutMs / 1000);
-        const tail = `\n\n_${left}s · !game stop to end · !game top for scores_`;
+        const tail = `\n\n${left}s · Send your answer.\n!game end to end your round · !top for scores`;
 
         switch (game.name) {
             case 'number': {
@@ -639,8 +629,8 @@ export function createGameEngine({
                 round.answer = randomInt(range.min, range.max, random);
                 return {
                     round,
-                    text: `${game.emoji} *Guess the number* — I picked one between *${range.min}* and *${range.max}*.\n`
-                        + 'Send a number. I answer too high / too low, and how warm you are.' + tail
+                    text: `${game.emoji} *Guess the number*\n\nI’ve picked a number from *${range.min}* to *${range.max}*.\n`
+                        + 'Try a guess — I’ll tell you higher or lower.\nUp to 10 pts; each wrong guess reduces the reward by 1.' + tail
                 };
             }
 
@@ -648,7 +638,7 @@ export function createGameEngine({
                 round.answer = random() < 0.5 ? 'Heads' : 'Tails';
                 return {
                     round,
-                    text: `${game.emoji} *Coin toss* — the coin is already in the air.\n`
+                    text: `${game.emoji} *Heads or tails?*\n\nThe coin is picked. What’s your call?\n`
                         + `Say *heads* or *tails*. Right call = ${game.points} pts.` + tail
                 };
             }
@@ -665,8 +655,8 @@ export function createGameEngine({
                     round.problem = { question: concept.q, level, points, concept: true };
                     return {
                         round,
-                        text: `${game.emoji} *Maths* (${level} · ${TOPIC_LABEL[concept.topic] || concept.topic}) — first correct answer wins ${points} pts.\n\n`
-                            + `❓ *${concept.q}*` + tail
+                        text: `${game.emoji} *Math · ${TOPIC_LABEL[concept.topic] || concept.topic}*\n${level} · ${points} pts\n\n`
+                            + questionText(concept) + tail
                     };
                 }
                 const problem = makeMath(level, random);
@@ -674,7 +664,7 @@ export function createGameEngine({
                 round.problem = problem;
                 return {
                     round,
-                    text: `${game.emoji} *Maths* (${problem.level}) — first correct answer wins ${problem.points} pts.\n\n`
+                    text: `${game.emoji} *Math · Arithmetic*\n${problem.level} · ${problem.points} pts\n\n`
                         + `*${problem.question} = ?*` + tail
                 };
             }
@@ -690,8 +680,13 @@ export function createGameEngine({
                 round.problem = { question: entry.q, level, points, concept: true };
                 return {
                     round,
-                    text: `${game.emoji} *Programming* (${level} · ${TOPIC_LABEL[entry.topic] || entry.topic}) — first correct answer wins ${points} pts.\n\n`
-                        + `❓ *${entry.q}*` + tail
+                    text: roundCard({
+                        emoji: game.emoji,
+                        title: `${TOPIC_LABEL[entry.topic] || 'Programming'} · ${level === 'hard' ? 'Hard' : 'Easy'}`,
+                        detail: `${points} pts · ${left}s`,
+                        question: questionText(entry),
+                        footer: 'Send your answer.\n!game end to end your round · !top for scores'
+                    })
                 };
             }
 
@@ -704,8 +699,8 @@ export function createGameEngine({
                 lastScramble.set(ctx.jid, { at: now(), value: word });
                 return {
                     round,
-                    text: `${game.emoji} *Word scramble* — ${word.length} letters, first correct word wins ${game.points} pts\n\n`
-                        + `🔀 *${round.scrambled.toUpperCase()}*`
+                    text: `${game.emoji} *Unscramble this*\n${word.length} letters · ${game.points} pts\n\n`
+                        + `*${round.scrambled.toUpperCase()}*`
                         + (puzzle.clue ? `\n_Clue: ${puzzle.clue}_` : '') + tail
                 };
             }
@@ -718,8 +713,8 @@ export function createGameEngine({
                 lastQuestion.set(ctx.jid, { at: now(), value: entry.q });
                 return {
                     round,
-                    text: `${game.emoji} *Trivia* — first correct answer wins ${game.points} pts\n\n`
-                        + `❓ *${entry.q}*`
+                    text: `${game.emoji} *Quick trivia*\n${game.points} pts · First correct answer wins\n\n`
+                        + questionText(entry)
                         + (entry.by ? `\n_by ${entry.by}_` : '')
                         + tail
                 };
@@ -730,7 +725,7 @@ export function createGameEngine({
                 round.endsAt = round.drawAt;
                 return {
                     round,
-                    text: `${game.emoji} *Lucky draw* — join with \`!in\`\n\n`
+                    text: `${game.emoji} *You’re invited to a lucky draw*\n\nSend !in to join.\nDraw in ${Math.round((round.drawAt - now()) / 1000)}s.\n`
                         + `Everyone who joins earns ${PARTICIPATION_POINTS} pt, and the random winner takes ${game.points} pts.\n`
                         + '_!game draw picks the winner right now._'
                 };
@@ -743,7 +738,7 @@ export function createGameEngine({
 
     const TOPIC_LABEL = {
         linear: 'linear algebra', calculus: 'calculus', mvc: 'multivariable calculus',
-        pf: 'programming fundamentals', oop: 'OOP', ds: 'data structures', coal: 'COAL / assembly'
+        pf: 'programming fundamentals', oop: 'OOP', ds: 'Data structures', coal: 'COAL / assembly'
     };
     const lastQuestion = new Map();   // jid → { at, value }
     const lastScramble = new Map();   // jid → { at, value }
@@ -840,7 +835,7 @@ export function createGameEngine({
         const round = active(ctx.jid);
         if (!round || round.closed) {
             return explicit
-                ? { handled: true, react: '😴', reply: 'No game is running here. Start one with *!game*' }
+                ? { handled: true, react: '😴', reply: 'No round running here. Start one with !game.' }
                 : { handled: false };
         }
 
@@ -848,7 +843,7 @@ export function createGameEngine({
         // labelOf awaits group metadata: an owner stop/reset may have cancelled
         // this round while that lookup was pending. Never resurrect its score.
         if (!enabled || active(ctx.jid) !== round || round.closed) {
-            return explicit ? (enabled ? { handled: true, react: 'ℹ️', reply: 'This round has ended.' } : gamesOff()) : { handled: false };
+            return explicit ? (enabled ? { handled: true, react: 'ℹ️', reply: 'That round has ended. Send !game to start another.' } : gamesOff()) : { handled: false };
         }
         const key = keyOf(ctx);
         const entry = playerEntry(round, key, label, idsOf(ctx));
@@ -858,7 +853,7 @@ export function createGameEngine({
             return {
                 handled: true,
                 react: '🚫',
-                reply: `🚫 You have used your ${maxAttempts} guesses here — let someone else try!`
+                reply: `You’ve used all ${maxAttempts} guesses this round. Try again next round.`
             };
         }
 
@@ -872,7 +867,7 @@ export function createGameEngine({
         }
 
         if (verdict.kind === 'repeat') {
-            return { handled: true, react: '♻️', reply: `♻️ You already tried *${verdict.value}*` };
+            return { handled: true, react: '♻️', reply: `You’ve tried *${verdict.value}* already. Try another.` };
         }
 
         entry.guesses = before + 1;
@@ -905,8 +900,9 @@ export function createGameEngine({
         const bonusLine = scored.bonus ? ` _(+${scored.bonus} streak bonus 🔥${scored.streak})_` : '';
         const guessLine = ` · ${entry.guesses} guess${entry.guesses === 1 ? '' : 'es'}`;
 
-        const reply = `🎉 *${label}* wins! ${REVEAL[round.name]?.(round) || ''}`.trim()
-            + `\n${points(won)}${bonusLine}${guessLine}`;
+        const reply = `🎉 *Nice one, ${label}!*\n${REVEAL[round.name]?.(round) || ''}`.trim()
+            + `\n\n${points(won)}${bonusLine}${guessLine}`
+            + (scored.player ? `\nTotal: ${scored.player.points} pts` : '');
 
         const summary = endRound(round.chat, { winnerKey: key, head: '', reason: 'win' });
         return { handled: true, react: '🎉', reply: summary ? `${reply}\n\n${summary}` : reply };
@@ -954,7 +950,7 @@ export function createGameEngine({
                     return {
                         kind: 'wrong',
                         closing: true,
-                        reply: `❌ Both calls are gone — the coin was *${round.answer}*`
+                        reply: `🪙 Both calls are gone — it was *${round.answer}*.`
                     };
                 }
                 if (value === round.answer) return { kind: 'win', points: GAME_POINTS.coin };
@@ -973,7 +969,7 @@ export function createGameEngine({
                     if (!explicit) return { kind: 'ignore' };
                     if (entry.tried.has(norm)) return { kind: 'repeat', value: raw };
                     entry.tried.add(norm);
-                    return { kind: 'wrong', reply: `❌ ${raw} is not it` };
+                    return { kind: 'wrong', reply: `Not quite — try again.` };
                 }
                 const n = parseNumberAnswer(raw);
                 if (n === null) {
@@ -982,7 +978,7 @@ export function createGameEngine({
                 if (entry.tried.has(n)) return { kind: 'repeat', value: n };
                 entry.tried.add(n);
                 if (n === round.answer) return { kind: 'win', points: round.problem.points };
-                return { kind: 'wrong', reply: explicit ? `❌ ${n} is not it` : undefined };
+                return { kind: 'wrong', reply: explicit ? `Not quite — try again.` : undefined };
             }
 
             case 'scramble': {
@@ -1006,7 +1002,7 @@ export function createGameEngine({
                 const norm = normalizeAnswer(raw);
                 if (entry.tried.has(norm)) return { kind: 'repeat', value: raw };
                 entry.tried.add(norm);
-                return { kind: 'wrong', reply: `❌ ${raw} is not it` };
+                return { kind: 'wrong', reply: `Not quite — try again.` };
             }
 
             default:
@@ -1041,8 +1037,8 @@ export function createGameEngine({
         const title = head !== undefined
             ? head
             : (reveal
-                ? `⏰ No winner this time — ${reveal}.`
-                : '⏰ Time is up.');
+                ? `${reason === 'timeout' ? '⏱️ *Time’s up*' : '*Round ended*'}\n${reveal}.`
+                : (reason === 'timeout' ? '⏱️ Time’s up.' : 'Round ended.'));
 
         const lines = [
             title,
@@ -1061,7 +1057,7 @@ export function createGameEngine({
         if (!rows.length) {
             return endRound(jid, {
                 reason: 'empty',
-                head: '🎁 Nobody joined the draw — no winner this time.'
+                head: '🎁 Draw closed — nobody joined this time.'
             });
         }
         const winner = pickOne(rows, random);
@@ -1075,9 +1071,10 @@ export function createGameEngine({
         winner.earned += GAME_POINTS.lucky + bonus;
 
         const text = [
-            `🎁 *${label}* wins the lucky draw!`,
+            `🎉 *Lucky pick: ${label}*`,
             `${points(winner.earned)}${bonus ? ` _(+${bonus} streak bonus 🔥${scored.streak})_` : ''}`
                 + ` · ${rows.length} entr${rows.length === 1 ? 'y' : 'ies'}: ${names.join(', ')}`,
+            scored.player ? `Total: ${scored.player.points} pts` : null,
             manual ? '_drawn early by request_' : null,
             `Next round: \`!game lucky\` · scores: \`!game top\``
         ].filter(Boolean).join('\n');
@@ -1090,9 +1087,9 @@ export function createGameEngine({
 
     // ── owner controls and !game subcommands ─────────────────────────────────
     const gamesOff = () => ({
-        handled: true, react: '🔕', reply: '🔕 Games are OFF. The bot owner can reopen them with *!game on*.'
+        handled: true, react: '🔕', reply: '🌙 Games are paused. The bot owner can reopen them with !game on.'
     });
-    const ownerOnly = () => ({ handled: true, react: '⛔', reply: '⛔ Only the bot owner can use that command.' });
+    const ownerOnly = () => ({ handled: true, react: '⛔', reply: '🔒 This command is for the bot owner.' });
 
     /** Cancel, never draw a winner or score a last guess. Inform other chats. */
     function cancelAll(origin, reason) {
@@ -1123,9 +1120,9 @@ export function createGameEngine({
             ? Object.entries(st).map(([c, v]) => `${c} ${v.count}${v.used ? ` (${v.used} played)` : ''}`).join(' · ')
             : `trivia ${content?.questionCount || 0} · scramble ${content?.puzzleCount || 0}`;
         const hours = st ? `\n_trivia/scramble renew every ${st.trivia.everyHours}h if played · math/code replace played questions every ${st.math.everyHours}h_` : '';
-        return `🎮 Games: *${enabled ? 'ON' : 'OFF'}* · ${rounds.size} active round(s) · ${cooldownMs / 1000}s between rounds\n`
+        return `🎮 *Game status*\n\nGames: *${enabled ? 'ON' : 'OFF'}*\nActive rounds: ${rounds.size} · ${cooldownMs / 1000}s between rounds\n`
             + `🎚️ Math/code mode here: *${scores?.modeOf?.(ctx?.jid) || 'easy'}*\n`
-            + `🧠 AI pool: ${line}${hours}`;
+            + `\n*Question pools*\nAI pool: ${line}${hours}`;
     }
 
     /** Owner: !game reset @member [all] — one member, this chat or every chat. */
@@ -1136,7 +1133,7 @@ export function createGameEngine({
             : typed.length ? typed
                 : ctx.quotedParticipant ? [ctx.quotedParticipant] : [];
         if (!raws.length) {
-            return { handled: true, react: '⚠️', reply: 'Usage: `!game reset @member` (this chat) · `!game reset @member all` (every chat) · `!game reset tops` (everyone)' };
+            return { handled: true, react: '⚠️', reply: 'Try it like this: `!game reset @member` (this chat) · `!game reset @member all` (every chat) · `!game reset tops` (everyone)' };
         }
         const lines = [];
         let any = false;
@@ -1175,7 +1172,7 @@ export function createGameEngine({
             const moduleName = String(args[2] || '').toLowerCase();
             const aliases = { coal: ['code', 'coal'], pf: ['code', 'pf'], oop: ['code', 'oop'], ds: ['code', 'ds'], trivia: ['trivia', null], math: ['math', null], calculus: ['math', 'calculus'], mvc: ['math', 'mvc'], linear: ['math', 'linear'], scramble: ['scramble', null] };
             const picked = aliases[moduleName];
-            if (!picked) return { handled: true, react: '⚠️', reply: 'Usage: `!game add new coal|pf|oop|ds|trivia|math|scramble`' };
+            if (!picked) return { handled: true, react: '⚠️', reply: 'Try it like this: `!game add new coal|pf|oop|ds|trivia|math|scramble`' };
             try {
                 const added = await content?.generateAndAdd?.(...picked);
                 if (!added?.length) throw new Error('question generator is unavailable');
@@ -1209,7 +1206,7 @@ export function createGameEngine({
                 void Promise.resolve().then(() => content.refreshIfStale())
                     .catch((err) => log?.warn?.(`game content: ${err.message}`));
             }
-            return { handled: true, react: '✅', reply: `✅ Games are ON for all members.${saved === false ? ' ⚠️ Could not save this setting to disk.' : ''}` };
+            return { handled: true, react: '✅', reply: `✅ Games are ON for everyone.\n!game to pick a round.${saved === false ? ' ⚠️ Could not save this setting to disk.' : ''}` };
         }
         if (sub === 'off' || (sub === 'stop' && ctx.isOwner)) {
             if (!ctx.isOwner) return ownerOnly();
@@ -1220,7 +1217,7 @@ export function createGameEngine({
             log?.info?.(`game: globally stopped by ${ctx.senderLabel} (${count} rounds)`);
             return {
                 handled: true, react: '🛑',
-                reply: `🛑 Games are OFF for all members. ${count} active round(s) cancelled. Use *!game on* to reopen.`
+                reply: `🌙 Games are OFF for everyone.\n${count} rounds cancelled.\n!game on to reopen.`
                     + (saved === false ? '\n⚠️ Could not save this setting to disk.' : '')
             };
         }
@@ -1283,7 +1280,7 @@ export function createGameEngine({
             return {
                 handled: true,
                 react: '⚠️',
-                reply: `⚠️ I do not know the game *${args[0]}*. Send *!game* for the list.`
+                reply: `That game isn’t on the list. Send !game to see the choices.`
             };
         }
 
@@ -1333,7 +1330,7 @@ export function createGameEngine({
         const until = cooldowns.get(ctx.jid) || 0;
         if (!current && now() < until && !ctx.isOwner) {
             const left = Math.ceil((until - now()) / 1000);
-            return { handled: true, react: '⏳', reply: `⏳ Give the last round a ${left}s breather, then start again.` };
+            return { handled: true, react: '⏳', reply: `⏳ Next round in ${left}s.` };
         }
 
         const built = build(ctx, game, args, key, label);
@@ -1355,7 +1352,7 @@ export function createGameEngine({
 
     function stopRound(ctx) {
         const round = active(ctx.jid);
-        if (!round) return { handled: true, react: 'ℹ️', reply: 'ℹ️ No game is running here.' };
+        if (!round) return { handled: true, react: 'ℹ️', reply: 'No round running here. Start one with !game.' };
         const mine = round.starterKey === keyOf(ctx);
 
         if (!mine && !ctx.isOwner) {
@@ -1377,7 +1374,7 @@ export function createGameEngine({
     function joinInternal(round, ctx, label) {
         const key = keyOf(ctx);
         const existing = round.players.get(key);
-        if (existing?.joined) return { ok: false, reply: `${label}, you are already in the draw (${round.players.size} joined).` };
+        if (existing?.joined) return { ok: false, reply: `You’re already in, ${label}. ${round.players.size} players have joined.` };
 
         const entry = playerEntry(round, key, label, idsOf(ctx));
         rememberIds(ctx, key);
@@ -1387,7 +1384,7 @@ export function createGameEngine({
         const seconds = Math.max(0, Math.round((round.endsAt - now()) / 1000));
         return {
             ok: true,
-            reply: `${label} is in! ${round.players.size} joined · draw in ~${seconds}s (!game draw to pick now).`
+            reply: `You’re in, ${label}! ${round.players.size} joined · Draw in ~${seconds}s (!game draw to pick now).`
         };
     }
 
@@ -1411,7 +1408,7 @@ export function createGameEngine({
         const text = (args || []).join(' ').trim()
             || String(ctx.text || '').replace(/^!\S*\s*/, '').trim();
         if (!text) {
-            return { handled: true, react: '⚠️', reply: 'Usage: `!guess <answer>` — or just send the answer.' };
+            return { handled: true, react: '⚠️', reply: 'Try it like this: `!guess <answer>` — or just send the answer.' };
         }
         return takeAttempt(ctx, text, true);
     }
@@ -1477,7 +1474,7 @@ export function createGameEngine({
             return {
                 handled: true,
                 react: '⚠️',
-                reply: '⚠️ Usage: `!game addq Question ; Answer`\n'
+                reply: '⚠️ Try it like this: `!game addq Question ; Answer`\n'
                     + 'Example: `!game addq Which city is the capital of Japan? ; Tokyo`\n'
                     + '_An / inside the answer adds another accepted spelling._'
             };
@@ -1494,7 +1491,7 @@ export function createGameEngine({
         });
 
         if (!result) return { handled: true, react: '⚠️', reply: '⚠️ The question pool is not available.' };
-        if (!result.ok) return { handled: true, react: '⚠️', reply: `⚠️ I could not add that: ${result.error}.` };
+        if (!result.ok) return { handled: true, react: '⚠️', reply: `⚠️ Couldn’t add that: ${result.error}.` };
 
         const mine = (scores.questions?.() || []).filter((e) => e.byKey && e.byKey === key).length;
         const credited = mine <= CONTRIBUTION_LIMIT;
@@ -1503,7 +1500,7 @@ export function createGameEngine({
         return {
             handled: true,
             react: '✅',
-            reply: `✅ Added to the trivia pool: *${result.entry.q}*\n`
+            reply: `✅ *Question added*\n${result.entry.q}\n`
                 + `_Answer: ${result.entry.a.join(' / ')}_ · ${scores.questionCount} questions in the pool`
                 + (credited ? `\n${points(CONTRIBUTION_POINTS)} for contributing 🎓` : '')
         };
@@ -1544,7 +1541,7 @@ export function createGameEngine({
             return {
                 handled: true,
                 react: '⚠️',
-                reply: '⚠️ Usage: `!game delete <question or number>`\n'
+                reply: '⚠️ Try it like this: `!game delete <question or number>`\n'
                     + 'Example: `!game delete Which city is the capital of Japan?`\n'
                     + '_Added questions are numbered — see them with `!game listq`, then `!game delete 3` removes #3._'
             };
@@ -1562,7 +1559,7 @@ export function createGameEngine({
                 return {
                     handled: true,
                     react: '⚠️',
-                    reply: `⚠️ I could not delete that: ${result.error}.`
+                    reply: `⚠️ Couldn’t delete that: ${result.error}.`
                         + (have ? ' See the numbers with `!game listq`.' : '')
                 };
             }
@@ -1578,7 +1575,7 @@ export function createGameEngine({
         // ── by text: search every pool ──
         const needle = questionKey(query);
         if (!needle) {
-            return { handled: true, react: '⚠️', reply: '⚠️ I could not delete that: the question is empty.' };
+            return { handled: true, react: '⚠️', reply: '⚠️ Couldn’t delete that: the question is empty.' };
         }
         const added = scores.findQuestions?.(query) || [];
         const aiItems = content?.questions?.() || [];
@@ -1637,13 +1634,13 @@ export function createGameEngine({
                 if (aiUnavailable && targets.every((t) => t.pool === 'AI')) {
                     return { handled: true, react: '⚠️', reply: '⚠️ That question lives in the AI pool, which cannot be edited right now.' };
                 }
-                return { handled: true, react: '⚠️', reply: '⚠️ I could not delete that: nothing was removed.' };
+                return { handled: true, react: '⚠️', reply: '⚠️ Couldn’t delete that: nothing was removed.' };
             }
             const from = [...new Set(done)].join(', ');
             return {
                 handled: true,
                 react: '🗑️',
-                reply: `🗑️ Deleted: *${targets[0].entry.q}*\n`
+                reply: `🗑️ *Question removed*\n${targets[0].entry.q}\n`
                     + `_Removed from ${from}._\n\n🧠 Pool: ${poolSummary()}`
                     + (aiUnavailable ? '\n⚠️ The AI copy could not be removed.' : '')
                     + (saveFailed ? '\n⚠️ Could not save to disk; it may return after a restart.' : '')
@@ -1711,14 +1708,14 @@ export function createGameEngine({
             return {
                 handled: true,
                 react: '⚠️',
-                reply: '⚠️ Usage: `!game modify <question or number> ; <new answer>`\n'
+                reply: '⚠️ Try it like this: `!game modify <question or number> ; <new answer>`\n'
                     + 'Example: `!game modify Which planet has rings? ; Saturn`\n'
                     + '_A `:` works too (`!game modify 3 : Saturn`), and `/` adds another accepted spelling._'
             };
         }
         const answers = right.split('/').map((s) => s.trim()).filter(Boolean);
         if (!answers.length) {
-            return { handled: true, react: '⚠️', reply: '⚠️ I could not modify that: the answer is missing.' };
+            return { handled: true, react: '⚠️', reply: '⚠️ Couldn’t modify that: the answer is missing.' };
         }
 
         // ── by number: added questions only ──
@@ -1730,7 +1727,7 @@ export function createGameEngine({
                 return {
                     handled: true,
                     react: '⚠️',
-                    reply: `⚠️ I could not modify that: ${result.error}.`
+                    reply: `⚠️ Couldn’t modify that: ${result.error}.`
                         + (scores.questionCount ? ' See the numbers with `!game listq`.' : '')
                 };
             }
@@ -1739,14 +1736,14 @@ export function createGameEngine({
                 react: '✏️',
                 reply: `✏️ Updated added question #${numbered[1]}: *${result.entry.q}*\n`
                     + `_Was: ${result.before.join(' / ')} → Now: ${result.entry.a.join(' / ')}_`
-                    + (result.saved === false ? '\n⚠️ Could not save to disk; it may revert after a restart.' : '')
+                    + (result.saved === false ? '\n⚠️ This change couldn’t be saved. It may revert after a restart.' : '')
             };
         }
 
         // ── by text: search every pool ──
         const needle = questionKey(left);
         if (!needle) {
-            return { handled: true, react: '⚠️', reply: '⚠️ I could not modify that: the question is empty.' };
+            return { handled: true, react: '⚠️', reply: '⚠️ Couldn’t modify that: the question is empty.' };
         }
         const added = scores.findQuestions?.(left) || [];
         const aiItems = content?.questions?.() || [];
@@ -1804,16 +1801,16 @@ export function createGameEngine({
                 if (aiUnavailable && targets.every((t) => t.pool === 'AI')) {
                     return { handled: true, react: '⚠️', reply: '⚠️ That question lives in the AI pool, which cannot be edited right now.' };
                 }
-                return { handled: true, react: '⚠️', reply: '⚠️ I could not modify that: nothing was updated.' };
+                return { handled: true, react: '⚠️', reply: '⚠️ Couldn’t modify that: nothing was updated.' };
             }
             const fresh = answers.join(' / ');
             const lines = done.map((d) => `• ${d.where}: _${(d.old || []).join(' / ') || '?'} → ${fresh}_`);
             return {
                 handled: true,
                 react: '✏️',
-                reply: `✏️ Updated: *${targets[0].entry.q}*\n${lines.join('\n')}`
+                reply: `✏️ *Answer updated*\n${targets[0].entry.q}\n${lines.join('\n')}`
                     + (aiUnavailable ? '\n⚠️ The AI copy could not be updated.' : '')
-                    + (saveFailed ? '\n⚠️ Could not save to disk; it may revert after a restart.' : '')
+                    + (saveFailed ? '\n⚠️ This change couldn’t be saved. It may revert after a restart.' : '')
             };
         }
 
@@ -1859,8 +1856,8 @@ export function createGameEngine({
         if (!query) {
             const lines = added.slice(0, 20).map((e, i) => `${i + 1}. ${short(e.q)} — _${short(e.a.join(' / '), 40)}_`);
             const head = added.length
-                ? `📋 *Added trivia (${added.length})*\n${lines.join('\n')}`
-                : '📋 No added trivia questions yet.';
+                ? `📚 *Your questions · ${added.length}*\n${lines.join('\n')}`
+                : '📚 No added questions yet. Try !game addq Question ; Answer';
             const more = added.length > 20 ? `\n_…and ${added.length - 20} more — refine with \`!game listq <search>\`._` : '';
             return { handled: true, reply: `${head}${more}\n\n🧠 Pool: ${poolSummary()}` };
         }

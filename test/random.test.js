@@ -125,14 +125,14 @@ test('!random without a range picks from a list when given one', () => {
 test('!roll, !flip, !pick, !shuffle and !8ball all answer', () => {
     const tools = createRandomTools({ random: fixed(0.5) });
 
-    assert.match(tools.handle('roll', []).reply, /1d6 → \*4\*/);
-    assert.match(tools.handle('roll', ['2d6']).reply, /2d6 → 4 \+ 4 = \*8\*/);
-    assert.match(tools.handle('roll', ['banana']).reply, /Usage: !roll/);
+    assert.match(tools.handle('roll', []).reply, /🎲 \*4\*\n1d6: 4/);
+    assert.match(tools.handle('roll', ['2d6']).reply, /🎲 \*8\*\n2d6: 4 \+ 4/);
+    assert.match(tools.handle('roll', ['banana']).reply, /Try it like this: !roll/);
     assert.match(tools.handle('flip', []).reply, /\*Tails\*/);
     assert.match(tools.handle('pick', ['a,', 'b']).reply, /\*b\*/);
-    assert.match(tools.handle('pick', ['lonely']).reply, /Usage: !pick/);
+    assert.match(tools.handle('pick', ['lonely']).reply, /Try it like this: !pick/);
     assert.match(tools.handle('shuffle', ['a,', 'b,', 'c']).reply, /🔀 \*Shuffled\*/);
     assert.match(tools.handle('eightball', ['will', 'it', 'rain?']).reply, /will it rain\?/);
-    assert.match(tools.handle('eightball', []).reply, /Ask me a question/);
+    assert.match(tools.handle('eightball', []).reply, /What’s your question/);
     assert.equal(tools.handle('wibble', []).handled, false, 'unknown names are not claimed');
 });

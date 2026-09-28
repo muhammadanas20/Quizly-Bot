@@ -164,32 +164,32 @@ export function createRandomTools({ random = Math.random } = {}) {
                     return {
                         handled: true,
                         react: '🎲',
-                        reply: `🎲 ${num(randomInt(range.min, range.max, random))}\n_${range.min}–${range.max}_`
+                        reply: `🎲 ${num(randomInt(range.min, range.max, random))}\nRange: ${range.min}–${range.max}`
                     };
                 }
 
                 // No range in there, so "!random apple, banana" is a pick from a list.
                 const options = parseOptions(args);
                 if (options.length) {
-                    return { handled: true, react: '🎯', reply: `🎲 ${num(pickOne(options, random))}` };
+                    return { handled: true, react: '🎯', reply: `🎯 ${num(pickOne(options, random))}` };
                 }
 
                 return {
                     handled: true,
                     react: '🎲',
-                    reply: `🎲 ${num(randomInt(1, 100, random))}\n_1–100_`
+                    reply: `🎲 ${num(randomInt(1, 100, random))}\nRange: 1–100`
                 };
             }
 
             case 'roll': {
                 const dice = parseDice(args.join(' '));
                 if (!dice) {
-                    return { handled: true, react: '⚠️', reply: 'Usage: !roll [NdM] — e.g. !roll, !roll 2d6, !roll d20' };
+                    return { handled: true, react: '⚠️', reply: 'Try it like this: !roll [NdM] — e.g. !roll, !roll 2d6, !roll d20' };
                 }
                 const { rolls, total } = rollDice(dice, random);
                 const label = `${dice.count}d${dice.sides}`;
-                const math = rolls.length > 1 ? `${rolls.join(' + ')} = ` : '';
-                return { handled: true, react: '🎲', reply: `🎲 ${label} → ${math}${num(total)}` };
+                const math = rolls.join(' + ');
+                return { handled: true, react: '🎲', reply: `🎲 ${num(total)}\n${label}: ${math}` };
             }
 
             case 'flip': {
@@ -200,7 +200,7 @@ export function createRandomTools({ random = Math.random } = {}) {
             case 'pick': {
                 const options = parseOptions(args);
                 if (options.length < 2) {
-                    return { handled: true, react: '⚠️', reply: 'Usage: !pick option1, option2[, option3…]' };
+                    return { handled: true, react: '⚠️', reply: 'Try it like this: !pick option1, option2[, option3…]' };
                 }
                 return { handled: true, react: '🎯', reply: `🎯 ${num(pickOne(options, random))}` };
             }
@@ -208,7 +208,7 @@ export function createRandomTools({ random = Math.random } = {}) {
             case 'shuffle': {
                 const options = parseOptions(args);
                 if (options.length < 2) {
-                    return { handled: true, react: '⚠️', reply: 'Usage: !shuffle option1, option2[, option3…]' };
+                    return { handled: true, react: '⚠️', reply: 'Try it like this: !shuffle option1, option2[, option3…]' };
                 }
                 const lines = shuffle(options, random).map((o, i) => `${i + 1}. ${o}`);
                 return { handled: true, react: '🔀', reply: `🔀 *Shuffled*\n${lines.join('\n')}` };
@@ -219,7 +219,7 @@ export function createRandomTools({ random = Math.random } = {}) {
                 return {
                     handled: true,
                     react: '🎱',
-                    reply: q ? `🎱 _${q}_\n${eightBall(random)}` : '🎱 Ask me a question: !8ball will I pass?'
+                    reply: q ? `🎱 ${eightBall(random)}\n\n_${q}_` : '🎱 What’s your question?\nTry: !8ball will I pass?'
                 };
             }
 

@@ -151,23 +151,23 @@ test('renderQuiz: question → one-line reason → answer, in order', () => {
     const out = renderQuiz({ ...sample, provider: 'gemini', model: 'gemini-2.5-flash', ms: 3400 });
 
     const lines = out.split('\n');
-    assert.match(lines[0], /^\*Quiz solved\* · 2 questions$/);
+    assert.match(lines[0], /^📝 \*Quiz answers · 2 questions\*$/);
 
     // exact per-question layout
     assert.equal(lines[2], '*Q1.* Capital of France?');
-    assert.equal(lines[3], '💡 Paris has been the seat of government since 987.');
+    assert.equal(lines[3], 'Paris has been the seat of government since 987.');
     assert.equal(lines[4], '✅ *A — Paris*');
 
     // ordering: Q1 block must appear before Q2 block
     assert.ok(out.indexOf('*Q1.*') < out.indexOf('*Q2.*'));
-    assert.ok(out.indexOf('💡 Basic addition.') > out.indexOf('*Q2.* 2 + 2 = ?'));
-    assert.ok(out.indexOf('✅ *C — 4*') > out.indexOf('💡 Basic addition.'));
+    assert.ok(out.indexOf('Basic addition.') > out.indexOf('*Q2.* 2 + 2 = ?'));
+    assert.ok(out.indexOf('✅ *C — 4*') > out.indexOf('Basic addition.'));
 
     // answer key at the end
-    assert.match(out, /━━ \*Answer key\* ━━/);
+    assert.match(out, /\*Answer key\*/);
     assert.match(out, /1\) A — Paris/);
     assert.match(out, /2\) C — 4/);
-    assert.match(out, /gemini · gemini-2\.5-flash · 3\.4s/);
+    assert.doesNotMatch(out, /gemini|3\.4s/, 'provider diagnostics stay out of chat');
 });
 
 test('renderQuiz: reports unreadable questions and never guesses them', () => {
@@ -178,7 +178,7 @@ test('renderQuiz: reports unreadable questions and never guesses them', () => {
 test('renderQuiz: missing reason is skipped, missing answer is flagged', () => {
     const out = renderQuiz({ questions: [{ n: 1, question: 'q', reason: '', answer: '' }] });
     assert.ok(!out.includes('💡'));
-    assert.match(out, /✅ \*— could not determine —\*/);
+    assert.match(out, /⚠️ Could not determine the answer\./);
 });
 
 test('renderQuiz: null when there is nothing to send', () => {
@@ -197,7 +197,7 @@ test('chunkText: short text is one message', () => {
 
 test('chunkText: splits on blank lines and never mid-question', () => {
     const blocks = Array.from({ length: 40 }, (_, i) => `*Q${i + 1}.* question text here\n💡 reason\n✅ *answer*`);
-    const text = `*Quiz solved*\n\n${blocks.join('\n\n')}`;
+    const text = `*Quiz answers*\n\n${blocks.join('\n\n')}`;
     const chunks = chunkText(text, 900);
 
     assert.ok(chunks.length > 1, 'expected multiple chunks');

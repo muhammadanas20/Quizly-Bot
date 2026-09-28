@@ -6,6 +6,8 @@
  * These are permanent; the AI pools in game-content.js add to them.
  */
 
+import { DS_QUESTIONS } from './ds-questions.js';
+
 const E = 'easy', H = 'hard';
 const q = (topic, level, question, ...a) => ({ q: question, a, level, topic });
 
@@ -148,6 +150,7 @@ export const CODE_BANK = Object.freeze([
     q('ds', H, 'What is the worst-case search time in an unbalanced BST?', 'O(n)', 'n'),
     q('ds', H, 'Which self-balancing BST keeps balance factors in {−1, 0, 1}?', 'avl', 'avl tree'),
     q('ds', H, 'Two keys mapping to the same hash slot is called a?', 'collision'),
+    ...DS_QUESTIONS,
     // COAL — easy (8086 assembly and registers)
     q('coal', E, 'In 8086, which register is the accumulator?', 'ax', 'al', 'eax'),
     q('coal', E, 'In 8086, which register is used as the counter by LOOP?', 'cx', 'ecx'),
