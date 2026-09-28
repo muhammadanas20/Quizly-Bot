@@ -13,12 +13,15 @@
  *   !game top [all]            leaderboard — this chat, or everywhere
  *   !game me                   your own score card
  *   !game addq Q ; A           owner: contribute a trivia question to the pool
+ *   !game addemoji 🦁👑 ; A     owner: contribute an emoji puzzle to its pool
  *   !game delete <Q|#>         owner: delete a trivia question (added, AI or built-in)
+ *   !game deleteemoji <#>      owner: delete an added emoji puzzle
  *   !game modify <Q|#> ; A     owner: change a trivia answer (added, AI or built-in)
  *   !game listq [search]       owner: list added trivia / search every pool
+ *   !game listemoji            owner: list the added emoji puzzles
  *   !game restore              owner: bring back hidden built-ins, clear modified answers
  *
- * Seven games: number, riddle, rps, math, code, scramble, trivia.
+ * Eight games: number, riddle, emoji, rps, math, code, scramble, trivia.
  * Everyone plays, everyone scores (every attempt earns a participation point),
  * and the scoreboard is per group so a big group's leaderboard means something.
  *
@@ -247,11 +250,70 @@ export function parseRpsCall(text) {
     return null;
 }
 
+// ─── Built-in emoji puzzles — decode the rebus (AI puzzles rotate on top) ────
+export const EMOJI_CATS = Object.freeze(['movie', 'phrase', 'thing', 'place', 'food']);
+export const EMOJI_PUZZLES = Object.freeze([
+    // movies
+    { emoji: '🦁👑', a: ['lion king', 'the lion king'], cat: 'movie' },
+    { emoji: '🚢🧊', a: ['titanic'], cat: 'movie' },
+    { emoji: '🕷️🧑', a: ['spider man', 'spiderman', 'the spider man'], cat: 'movie' },
+    { emoji: '🦇🧑', a: ['batman', 'bat man', 'the batman'], cat: 'movie' },
+    { emoji: '❄️👸', a: ['frozen'], cat: 'movie' },
+    { emoji: '🧞🪔', a: ['aladdin'], cat: 'movie' },
+    { emoji: '🐠🔍', a: ['finding nemo'], cat: 'movie' },
+    { emoji: '🐼🥋', a: ['kung fu panda'], cat: 'movie' },
+    { emoji: '🐀🍳', a: ['ratatouille'], cat: 'movie' },
+    { emoji: '🧙💍', a: ['lord of the rings', 'the lord of the rings'], cat: 'movie' },
+    { emoji: '👻🚗', a: ['ghostbusters', 'ghost busters'], cat: 'movie' },
+    { emoji: '🦈🏖️', a: ['jaws'], cat: 'movie' },
+    { emoji: '🐔🏃', a: ['chicken run'], cat: 'movie' },
+    { emoji: '🤖🪴', a: ['wall e', 'walle'], cat: 'movie' },
+    { emoji: '🐍✈️', a: ['snakes on a plane'], cat: 'movie' },
+    { emoji: '🦸🛡️', a: ['captain america'], cat: 'movie' },
+    { emoji: '🐇🎩', a: ['alice in wonderland'], cat: 'movie' },
+    { emoji: '🐝🎬', a: ['bee movie'], cat: 'movie' },
+    // phrases and sayings
+    { emoji: '🌧️🐱🐶', a: ['raining cats and dogs', 'its raining cats and dogs'], cat: 'phrase' },
+    { emoji: '👁️🍎', a: ['apple of my eye'], cat: 'phrase' },
+    { emoji: '🐟💦', a: ['fish out of water', 'a fish out of water'], cat: 'phrase' },
+    { emoji: '🐴🤫', a: ['hold your horses', 'hold the horses'], cat: 'phrase' },
+    // things and creatures
+    { emoji: '🌕🐺', a: ['werewolf', 'were wolf'], cat: 'thing' },
+    { emoji: '🧛🦇', a: ['vampire', 'a vampire'], cat: 'thing' },
+    { emoji: '🧟', a: ['zombie', 'a zombie'], cat: 'thing' },
+    { emoji: '🦄🌈', a: ['unicorn', 'a unicorn'], cat: 'thing' },
+    { emoji: '🧜‍♀️🌊', a: ['mermaid', 'a mermaid'], cat: 'thing' },
+    { emoji: '🐉🔥', a: ['dragon', 'a dragon'], cat: 'thing' },
+    { emoji: '👻🏚️', a: ['haunted house'], cat: 'thing' },
+    { emoji: '🕷️🕸️', a: ['spider web', 'cobweb', 'web'], cat: 'thing' },
+    { emoji: '🐝🏠', a: ['beehive', 'bee hive', 'hive'], cat: 'thing' },
+    { emoji: '🦷🧚', a: ['tooth fairy', 'the tooth fairy'], cat: 'thing' },
+    { emoji: '🌞🧴', a: ['sunscreen', 'sun cream', 'sunblock'], cat: 'thing' },
+    { emoji: '🌧️🧢', a: ['raincoat', 'rain coat'], cat: 'thing' },
+    { emoji: '🎩🐇', a: ['magician', 'magic trick', 'a magician'], cat: 'thing' },
+    { emoji: '🍫🏭', a: ['chocolate factory'], cat: 'thing' },
+    { emoji: '🧑‍🚀🚀', a: ['astronaut', 'an astronaut'], cat: 'thing' },
+    { emoji: '👨‍🍳🍳', a: ['chef', 'cook', 'a chef'], cat: 'thing' },
+    { emoji: '🎨🖼️', a: ['artist', 'painter'], cat: 'thing' },
+    { emoji: '🕵️🔍', a: ['detective', 'a detective'], cat: 'thing' },
+    // places
+    { emoji: '🗼🥖', a: ['paris', 'france'], cat: 'place' },
+    { emoji: '🐫🏜️', a: ['desert', 'the desert'], cat: 'place' },
+    { emoji: '🏝️🌴', a: ['island', 'an island'], cat: 'place' },
+    { emoji: '🎡🎢', a: ['funfair', 'amusement park', 'theme park', 'carnival'], cat: 'place' },
+    // food
+    { emoji: '🍋🍹', a: ['lemonade'], cat: 'food' },
+    { emoji: '🥑🍞', a: ['avocado toast'], cat: 'food' },
+    { emoji: '🍅🥣', a: ['tomato soup'], cat: 'food' },
+    { emoji: '🍌🍦🥛', a: ['milkshake', 'banana shake', 'banana milkshake'], cat: 'food' }
+]);
+
 /** Winner points per game. A round can be lost, never the scoreboard. */
 export const GAME_POINTS = Object.freeze({
     number : 10,
     riddle : 8,
     rps    : 8,
+    emoji  : 8,
     math   : 5,
     code   : 5,
     scramble: 5,
@@ -279,6 +341,12 @@ export const GAMES = Object.freeze([
         title: 'Riddle', points: GAME_POINTS.riddle,
         how: '!game riddle → send the answer',
         blurb: 'A tricky brain teaser. First correct answer takes 8 pts.'
+    },
+    {
+        name: 'emoji', aliases: ['emoji', 'emojis', 'rebus', 'puzzle'], emoji: '🎭', mode: 'race',
+        title: 'Emoji puzzle', points: GAME_POINTS.emoji,
+        how: '!game emoji → decode the emojis',
+        blurb: 'Emojis stand for a film, phrase or thing — decode it for 8 pts.'
     },
     {
         name: 'rps', aliases: ['rps', 'rock', 'roshambo', 'rpsbot'], emoji: '✊', mode: 'race',
@@ -495,6 +563,7 @@ export function makeMath(level = 'easy', random = Math.random) {
 const REVEAL = {
     number  : (r) => `the number was *${r.answer}*`,
     riddle  : (r) => `the answer was *${r.accepted[0]}*`,
+    emoji   : (r) => `the answer was *${r.accepted[0]}*`,
     rps     : (r) => `the bot threw *${r.answer}*`,
     math    : (r) => `the answer was *${r.accepted ? r.accepted[0] : r.answer}*`,
     code    : (r) => `the answer was *${r.accepted[0]}*`,
@@ -731,6 +800,20 @@ export function createGameEngine({
                 };
             }
 
+            case 'emoji': {
+                const entry = pickEmoji(ctx.jid);
+                if (!entry) return { error: 'The emoji puzzle pool is empty.' };
+                round.pool = entry;
+                round.accepted = entry.a;
+                round.cat = entry.cat || 'thing';
+                lastEmoji.set(ctx.jid, { at: now(), value: entry.emoji });
+                return {
+                    round,
+                    text: `${game.emoji} *Emoji puzzle*\n${game.points} pts · Decode it\n\n`
+                        + `*${entry.emoji}*\n_Category: ${round.cat}_` + tail
+                };
+            }
+
             case 'rps': {
                 round.answer = pickOne(RPS_HANDS, random);
                 return {
@@ -830,6 +913,7 @@ export function createGameEngine({
     };
     const lastQuestion = new Map();   // jid → { at, value }
     const lastRiddle = new Map();     // jid → { at, value }
+    const lastEmoji = new Map();      // jid → { at, value }
     const lastScramble = new Map();   // jid → { at, value }
 
     /** O(pool size), bounded; no immediate repeats even with a fixed RNG. */
@@ -860,6 +944,16 @@ export function createGameEngine({
         const pool = [...RIDDLES, ...ai];
         const picked = pickDifferent(pool, lastRiddle.get(jid)?.value, 'q') || RIDDLES[0];
         if (ai.includes(picked)) content?.markUsed?.('riddle', picked);
+        return picked;
+    }
+
+    function pickEmoji(jid) {
+        const contributed = (scores?.emojiQuestions?.() || [])
+            .map((e) => ({ emoji: e.emoji, a: e.a, cat: e.cat || 'thing', byKey: e.byKey || '' }));
+        const ai = content?.items?.('emoji') || [];
+        const pool = [...EMOJI_PUZZLES, ...contributed, ...ai];
+        const picked = pickDifferent(pool, lastEmoji.get(jid)?.value, 'emoji') || EMOJI_PUZZLES[0];
+        if (ai.includes(picked)) content?.markUsed?.('emoji', picked);
         return picked;
     }
 
@@ -911,6 +1005,7 @@ export function createGameEngine({
             }
             case 'scramble': return `💡 It starts with *${String(round.answer)[0].toUpperCase()}*`;
             case 'riddle':   return `💡 The answer starts with *${String(round.accepted[0])[0].toUpperCase()}*`;
+            case 'emoji':    return `💡 It is a ${round.cat} · the answer starts with *${String(round.accepted[0])[0].toUpperCase()}*`;
             case 'rps':      return '💡 Rock beats Scissors · Paper beats Rock · Scissors beats Paper';
             case 'trivia':   return `💡 The answer starts with *${String(round.accepted[0])[0].toUpperCase()}*`;
             case 'math':     return round.accepted
@@ -1090,11 +1185,12 @@ export function createGameEngine({
             }
 
             case 'trivia':
-            case 'riddle': {
+            case 'riddle':
+            case 'emoji': {
                 if (answerMatches(raw, round.accepted)) {
                     const norm = normalizeAnswer(raw);
                     if (entry.tried.has(norm)) return { kind: 'repeat', value: raw };
-                    return { kind: 'win', points: round.name === 'riddle' ? GAME_POINTS.riddle : GAME_POINTS.trivia };
+                    return { kind: 'win', points: GAME_POINTS[round.name] || GAME_POINTS.trivia };
                 }
                 if (!explicit) return { kind: 'ignore' };          // plain chat, not an answer
                 const norm = normalizeAnswer(raw);
@@ -1161,6 +1257,7 @@ export function createGameEngine({
         cooldowns.clear();
         lastQuestion.clear();
         lastRiddle.clear();
+        lastEmoji.clear();
         lastScramble.clear();
         if (send && cancelled.length) {
             // Sequential/async: do not hold up the owner's confirmation or
@@ -1232,9 +1329,9 @@ export function createGameEngine({
         if (sub === 'add' && String(args[1] || '').toLowerCase() === 'new') {
             if (!ctx.isOwner) return ownerOnly();
             const moduleName = String(args[2] || '').toLowerCase();
-            const aliases = { coal: ['code', 'coal'], pf: ['code', 'pf'], oop: ['code', 'oop'], ds: ['code', 'ds'], trivia: ['trivia', null], riddle: ['riddle', null], math: ['math', null], calculus: ['math', 'calculus'], mvc: ['math', 'mvc'], linear: ['math', 'linear'], scramble: ['scramble', null] };
+            const aliases = { coal: ['code', 'coal'], pf: ['code', 'pf'], oop: ['code', 'oop'], ds: ['code', 'ds'], trivia: ['trivia', null], riddle: ['riddle', null], emoji: ['emoji', null], math: ['math', null], calculus: ['math', 'calculus'], mvc: ['math', 'mvc'], linear: ['math', 'linear'], scramble: ['scramble', null] };
             const picked = aliases[moduleName];
-            if (!picked) return { handled: true, react: '⚠️', reply: 'Try it like this: `!game add new coal|pf|oop|ds|trivia|math|scramble`' };
+            if (!picked) return { handled: true, react: '⚠️', reply: 'Try it like this: `!game add new coal|pf|oop|ds|trivia|riddle|emoji|math|scramble`' };
             try {
                 const added = await content?.generateAndAdd?.(...picked);
                 if (!added?.length) throw new Error('question generator is unavailable');
@@ -1331,6 +1428,15 @@ export function createGameEngine({
         }
         if (sub === 'restore' || sub === 'undelete') {
             return restoreHidden(ctx);
+        }
+        if (sub === 'addemoji' || sub === 'addemojis') {
+            return addEmojiPuzzle(ctx, args.slice(1));
+        }
+        if (sub === 'deleteemoji' || sub === 'delemoji' || sub === 'removeemoji') {
+            return deleteEmojiPuzzle(ctx, args.slice(1));
+        }
+        if (sub === 'listemoji' || sub === 'listemojis' || sub === 'emojipuzzles') {
+            return listEmojiPuzzles(ctx);
         }
         if (!enabled) return gamesOff();
         if (sub === 'stop' || sub === 'end' || sub === 'quit' || sub === 'cancel') {
@@ -1449,7 +1555,8 @@ export function createGameEngine({
             case 'scramble':
                 return /^[\p{L}]{3,24}$/u.test(text) ? takeAttempt(ctx, text, false) : { handled: false };
             case 'trivia':
-            case 'riddle': {
+            case 'riddle':
+            case 'emoji': {
                 // Only a correct answer interrupts a conversation; wrong guesses
                 // are for people who used !guess.
                 return answerMatches(text, round.accepted) ? takeAttempt(ctx, text, false) : { handled: false };
@@ -1921,6 +2028,86 @@ export function createGameEngine({
         };
     }
 
+    // ── owner-curated emoji puzzles ──────────────────────────────────────────
+    /**
+     * `!game addemoji 🦁👑 ; The Lion King` — owner-only, the addq of the
+     * emoji game. `/` inside the answer adds another accepted spelling.
+     */
+    function addEmojiPuzzle(ctx, args) {
+        if (!ctx.isOwner) return ownerOnly();
+        if (!enabled) return gamesOff();
+        const raw = args.join(' ').trim();
+        const split = raw.match(/^(.*?)\s*(?:;|\||->)\s*(.+)$/);
+        if (!raw || !split) {
+            return {
+                handled: true,
+                react: '⚠️',
+                reply: '⚠️ Try it like this: `!game addemoji 🦁👑 ; The Lion King`\n'
+                    + '_An / inside the answer adds another accepted spelling._'
+            };
+        }
+        const emoji = split[1].trim();
+        const answers = String(split[2]).split('/').map((x) => x.trim()).filter(Boolean);
+        if (!emoji || emoji.length > 48 || !answers.length) {
+            return { handled: true, react: '⚠️', reply: '⚠️ Both parts are needed: `!game addemoji 🦁👑 ; The Lion King`' };
+        }
+
+        const key = keyOf(ctx);
+        const result = scores?.addEmojiPuzzle?.({
+            emoji, a: answers, by: labelOfSync(ctx), byKey: key, chat: ctx.jid
+        });
+        if (!result) return { handled: true, react: '⚠️', reply: '⚠️ The emoji pool is not available.' };
+        if (!result.ok) return { handled: true, react: '⚠️', reply: `⚠️ Couldn’t add that: ${result.error}.` };
+
+        const mine = (scores.emojiQuestions?.() || []).filter((e) => e.byKey && e.byKey === key).length;
+        const credited = mine <= CONTRIBUTION_LIMIT;
+        if (credited) scores.award(ctx.jid, whoOf(ctx, labelOfSync(ctx)), CONTRIBUTION_POINTS);
+
+        return {
+            handled: true,
+            react: '✅',
+            reply: `✅ *Emoji puzzle added*\n${result.entry.emoji}\n`
+                + `_Answer: ${result.entry.a.join(' / ')}_ · ${scores.emojiQuestionCount} in the pool`
+                + (credited ? `\n${points(CONTRIBUTION_POINTS)} for contributing 🎓` : '')
+        };
+    }
+
+    /** `!game listemoji` — owner-only: the added puzzles, numbered for deleteemoji. */
+    function listEmojiPuzzles(ctx) {
+        if (!ctx.isOwner) return ownerOnly();
+        const added = scores?.emojiQuestions?.() || [];
+        if (!added.length) {
+            return { handled: true, reply: '🎭 No added emoji puzzles yet. Try `!game addemoji 🦁👑 ; The Lion King`' };
+        }
+        const lines = added.slice(0, 20).map((e, i) => `${i + 1}. ${e.emoji} — _${short(e.a.join(' / '), 40)}_`);
+        const more = added.length > 20 ? `\n_…and ${added.length - 20} more._` : '';
+        return { handled: true, reply: `🎭 *Your emoji puzzles · ${added.length}*\n${lines.join('\n')}${more}` };
+    }
+
+    /** `!game deleteemoji <#>` — owner-only: remove one added puzzle by its number. */
+    function deleteEmojiPuzzle(ctx, args) {
+        if (!ctx.isOwner) return ownerOnly();
+        if (!scores?.removeEmojiPuzzleAt) return { handled: true, react: '⚠️', reply: '⚠️ The emoji pool is not available.' };
+        const numbered = args.join(' ').trim().match(/^#?(\d+)$/);
+        if (!numbered) {
+            return {
+                handled: true,
+                react: '⚠️',
+                reply: '⚠️ Try it like this: `!game deleteemoji 3` — see the numbers with `!game listemoji`.'
+            };
+        }
+        const result = scores.removeEmojiPuzzleAt(Number(numbered[1]) - 1);
+        if (!result) return { handled: true, react: '⚠️', reply: '⚠️ The emoji pool is not available.' };
+        if (!result.ok) return { handled: true, react: '⚠️', reply: `⚠️ Couldn’t delete that: ${result.error}.` };
+        return {
+            handled: true,
+            react: '🗑️',
+            reply: `🗑️ Deleted emoji puzzle #${numbered[1]}: *${result.entry.emoji}*\n`
+                + `_Answer was: ${result.entry.a.join(' / ')}_`
+                + (result.saved === false ? '\n⚠️ Could not save to disk; it may return after a restart.' : '')
+        };
+    }
+
     // ── timers ───────────────────────────────────────────────────────────────
     /** Close every round whose time is up. Returns what it announced. */
     async function sweep() {
@@ -1950,6 +2137,7 @@ export function createGameEngine({
         // die with the silence it was protecting against.
         for (const [jid, e] of lastQuestion) if (now() - e.at >= repeatMemoryMs) lastQuestion.delete(jid);
         for (const [jid, e] of lastRiddle) if (now() - e.at >= repeatMemoryMs) lastRiddle.delete(jid);
+        for (const [jid, e] of lastEmoji) if (now() - e.at >= repeatMemoryMs) lastEmoji.delete(jid);
         for (const [jid, e] of lastScramble) if (now() - e.at >= repeatMemoryMs) lastScramble.delete(jid);
         for (const [stamp, e] of lastConcept) if (now() - e.at >= repeatMemoryMs) lastConcept.delete(stamp);
         return out;

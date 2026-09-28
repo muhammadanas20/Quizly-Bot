@@ -29,10 +29,11 @@ export const GAME_GUIDE = [
     '!game answer — reveal the current answer', '',
     '*Owner question tools*',
     '!game addq Question ; Answer',
-    '!game listq [search]',
+    '!game addemoji Emojis ; Answer',
+    '!game listq [search] · !game listemoji',
     '!game modify Question ; New answer',
-    '!game delete Question',
+    '!game delete Question · !game deleteemoji <#>',
     '!game restore',
     '!game add new ds',
-    'Generation topics: pf · oop · ds · coal · trivia · math · scramble'
+    'Generation topics: pf · oop · ds · coal · trivia · riddle · emoji · math · scramble'
 ].join('\n');

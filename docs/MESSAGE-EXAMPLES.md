@@ -43,6 +43,7 @@ The media guard stays silent, including for view-once media.
 
 🔢 *number* — A secret number, too-high/too-low hints, hot-and-cold feedback, 10 pts.
 🧩 *riddle* — A tricky brain teaser. First correct answer takes 8 pts.
+🎭 *emoji* — Emojis stand for a film, phrase or thing — decode it for 8 pts.
 ✊ *rps* — The bot has already thrown. Beat its hand for 8 pts — two misses and it shows its hand.
 ➗ *math* — Arithmetic plus linear algebra, calculus and multivariable calculus. 5 easy / 10 hard.
 💻 *code* — PF, OOP, data structures and COAL assembly/registers. 5 easy / 10 hard.
@@ -72,6 +73,8 @@ Wins earn game points; streaks can add a bonus.
 !game number [1-100] → send a number
 🧩 *riddle* · 8 pts
 !game riddle → send the answer
+🎭 *emoji* · 8 pts
+!game emoji → decode the emojis
 ✊ *rps* · 8 pts
 !game rps → call rock, paper or scissors
 ➗ *math* · 5 pts
@@ -132,6 +135,19 @@ Up to 10 pts; each wrong guess reduces the reward by 1.
 8 pts · First correct answer wins
 
 I speak without a mouth and hear without ears. I have no body, but I come alive with the wind. What am I?
+
+180s · Send your answer.
+!game end to end your round · !top for scores
+````
+
+## emoji round
+
+````text
+🎭 *Emoji puzzle*
+8 pts · Decode it
+
+*🦁👑*
+_Category: movie_
 
 180s · Send your answer.
 !game end to end your round · !top for scores

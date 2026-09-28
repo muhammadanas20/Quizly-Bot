@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { createGameEngine, GAMES, TRIVIA, RIDDLES, RPS_HANDS, parseRpsCall, findGame, answerMatches, looseMatches, normalizeAnswer, hotCold, scrambleWord, makeMath, WORDS } from '../src/games.js';
+import { createGameEngine, GAMES, TRIVIA, RIDDLES, EMOJI_PUZZLES, EMOJI_CATS, RPS_HANDS, parseRpsCall, findGame, answerMatches, looseMatches, normalizeAnswer, hotCold, scrambleWord, makeMath, WORDS } from '../src/games.js';
 import { createScoreStore } from '../src/scores.js';
 import { loadConfig } from '../src/config.js';
 import log from '../src/log.js';
@@ -165,7 +165,7 @@ test('parseRpsCall accepts hands, shorthand and emoji, rejects the rest', () => 
 });
 
 test('every advertised game can be started by its canonical name', () => {
-    assert.equal(GAMES.length, 7);
+    assert.equal(GAMES.length, 8);
     assert.equal(findGame('dice'), null, 'dice was removed');
     assert.equal(findGame('coin'), null, 'the coin game was removed');
     assert.equal(findGame('lucky'), null, 'the lucky draw was removed');
@@ -560,6 +560,83 @@ test('!game riddle: four wrong guesses earn a hint, a timeout reveals the answer
     assert.equal(out.length, 1);
     assert.match(out[0].text, new RegExp(`the answer was \\*${answer}\\*`));
     assert.deepEqual(sent, [{ jid: GROUP, text: out[0].text }]);
+});
+
+// ── emoji puzzles ────────────────────────────────────────────────────────────
+test('built-in emoji pool is unique, categorised and answerable', () => {
+    assert.ok(EMOJI_PUZZLES.length >= 40);
+    assert.equal(new Set(EMOJI_PUZZLES.map((e) => e.emoji)).size, EMOJI_PUZZLES.length);
+    assert.ok(EMOJI_PUZZLES.every((e) => e.a.length > 0 && e.a.every((a) => a.length <= 40)));
+    assert.ok(EMOJI_PUZZLES.every((e) => EMOJI_CATS.includes(e.cat)));
+    assert.ok(EMOJI_PUZZLES.every((e) => answerMatches(e.a[0], e.a)));
+});
+
+test('!game emoji: decode the rebus for 8 pts, wrong guesses stay explicit', async () => {
+    const { games, scores } = world();
+    const start = await games.handle(asAli('!game emoji'), ['emoji']);
+    assert.match(start.reply, /Emoji puzzle/);
+    assert.match(start.reply, /8 pts/);
+    const round = games.active(GROUP);
+    assert.ok(start.reply.includes(round.pool.emoji), 'the emojis are on the card');
+    assert.match(start.reply, new RegExp(`Category: ${round.cat}`));
+    const answer = round.accepted[0];
+
+    const chat = await games.handleMessage(asSana('no idea at all'));
+    assert.deepEqual(chat, { handled: false }, 'an emoji round does not swallow chat');
+
+    const wrong = await games.guess(asSana('!guess a sandwich'), ['a', 'sandwich']);
+    assert.match(wrong.reply, /Not quite/);
+
+    const win = await games.guess(asAli(`!guess ${answer}`), [answer]);
+    assert.equal(win.react, '🎉');
+    assert.match(win.reply, new RegExp(`the answer was \\*${answer.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\*`));
+    assert.match(win.reply, /\*\+8\*/);
+    assert.equal(scores.playerOf(GROUP, [PN]).points, 9, '8 for the win + 1 for playing');
+    assert.equal(games.active(GROUP), null);
+});
+
+// ── owner-reserved emoji curation ────────────────────────────────────────────
+test('owner emoji curation: addemoji, listemoji, deleteemoji; members are refused', async () => {
+    const { games, scores, dir, tick } = world({ random: seq([0.99, 0.99]) });   // 0.99 → the last pool entry
+
+    const refused = await games.handle(asSana('!game addemoji 🦁👑 ; lion king'), ['addemoji', '🦁👑', ';', 'lion king']);
+    assert.equal(refused.react, '⛔', 'addemoji is owner-reserved');
+    assert.match((await games.handle(asSana('!game listemoji'), ['listemoji'])).reply, /bot owner/);
+    assert.match((await games.handle(asSana('!game deleteemoji 1'), ['deleteemoji', '1'])).reply, /bot owner/);
+
+    const added = await games.handle(asAli('!game addemoji 🦁👑 ; The Lion King / lion king', { isOwner: true }),
+        ['addemoji', '🦁👑', ';', 'The Lion King / lion king']);
+    assert.match(added.reply, /Emoji puzzle added/);
+    assert.equal(scores.emojiQuestionCount, 1);
+    assert.equal(scores.playerOf(GROUP, [PN]).points, 2, 'contributing earns the contribution points');
+
+    const dup = await games.handle(asAli('!game addemoji 🦁👑 ; lion king', { isOwner: true }),
+        ['addemoji', '🦁👑', ';', 'lion king']);
+    assert.match(dup.reply, /already in the pool/);
+
+    const listed = await games.handle(asAli('!game listemoji', { isOwner: true }), ['listemoji']);
+    assert.match(listed.reply, /Your emoji puzzles · 1/);
+    assert.ok(listed.reply.includes('🦁👑'));
+
+    const bad = await games.handle(asAli('!game deleteemoji 5', { isOwner: true }), ['deleteemoji', '5']);
+    assert.match(bad.reply, /no added emoji puzzle #5/);
+
+    const deleted = await games.handle(asAli('!game deleteemoji 1', { isOwner: true }), ['deleteemoji', '1']);
+    assert.match(deleted.reply, /Deleted emoji puzzle #1/);
+    assert.equal(scores.emojiQuestionCount, 0);
+
+    // and an added puzzle joins the round pool until deleted
+    await games.handle(asAli('!game addemoji 🎩🐰 ; mad hatter', { isOwner: true }), ['addemoji', '🎩🐰', ';', 'mad hatter']);
+    tick(6000);
+    await games.handle(asAli('!game emoji'), ['emoji']);
+    const round = games.active(GROUP);
+    assert.ok(round, 'the round starts');
+    assert.equal(round.pool.emoji, '🎩🐰', 'the contributed puzzle is playable');
+
+    scores.flush();
+    const reopened = createScoreStore({ file: path.join(dir, 'scores.json') }).load();
+    assert.equal(reopened.emojiQuestionCount, 1, 'contributed puzzles survive a restart');
+    assert.equal(reopened.emojiQuestions()[0].emoji, '🎩🐰');
 });
 
 // ── control: stop, replace, cooldown, timeout ────────────────────────────────

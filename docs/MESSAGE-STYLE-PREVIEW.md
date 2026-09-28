@@ -107,6 +107,7 @@ Game controls and question management: !game help
 
 🔢 number — guess the number
 🧩 riddle — a tricky brain teaser
+🎭 emoji — decode the emoji rebus
 ✊ rps — beat the bot's hidden hand
 ➗ math — solve a problem
 💻 code — programming challenges
@@ -217,6 +218,17 @@ Each wrong guess reduces the reward by 1.
 First correct answer wins.
 ```
 
+**Emoji puzzle**
+```text
+🎭 *Emoji puzzle*
+
+{emoji string}
+_Category: {movie · phrase · thing · place · food}_
+
+{points} pts · {duration}
+Send the answer.
+```
+
 **Rock-Paper-Scissors**
 ```text
 ✊ *Rock · Paper · Scissors*
@@ -293,6 +305,7 @@ First correct answer wins.
 | Number narrowing hint | 💡 It’s between {low} and {high}. |
 | Letter hint | 💡 Starts with *{letter}*. {length detail when applicable} |
 | Riddle hint | 💡 The answer starts with *{letter}*. |
+| Emoji hint | 💡 It is a {category} · the answer starts with *{letter}*. |
 | RPS hint | 💡 Rock beats Scissors · Paper beats Rock · Scissors beats Paper. |
 | Repeated guess | You’ve tried *{guess}* already. Try another. |
 | Attempts exhausted | You’ve used all {limit} guesses this round. Next round is yours to try. |

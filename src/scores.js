@@ -28,6 +28,7 @@ const SAVE_DELAY_MS = 1500;
 const MAX_QUESTIONS = 500;
 const QUESTION_MAX_LEN = 200;
 const ANSWER_MAX_LEN = 60;
+const EMOJI_MAX_LEN = 48;
 
 /**
  * The key a person's score is stored under.
@@ -55,7 +56,7 @@ const clean = (s, max) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, m
 export const questionKey = (s) => String(s ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
 export function createScoreStore({ file, log, maxQuestions = MAX_QUESTIONS } = {}) {
-    let data = { version: VERSION, chats: {}, questions: [], hiddenTrivia: [], triviaOverrides: {}, settings: {} };
+    let data = { version: VERSION, chats: {}, questions: [], emojiQuestions: [], hiddenTrivia: [], triviaOverrides: {}, settings: {} };
     let saveTimer = null;
 
     // ── persistence ──────────────────────────────────────────────────────────
@@ -69,6 +70,10 @@ export function createScoreStore({ file, log, maxQuestions = MAX_QUESTIONS } = {
                         version  : VERSION,
                         chats    : parsed.chats && typeof parsed.chats === 'object' ? parsed.chats : {},
                         questions: Array.isArray(parsed.questions) ? parsed.questions : [],
+                        emojiQuestions: Array.isArray(parsed.emojiQuestions)
+                            ? parsed.emojiQuestions.filter((e) => e && typeof e.emoji === 'string' && e.emoji
+                                && Array.isArray(e.a) && e.a.length && e.a.every((x) => typeof x === 'string'))
+                            : [],
                         hiddenTrivia: Array.isArray(parsed.hiddenTrivia)
                             ? parsed.hiddenTrivia.filter((k) => typeof k === 'string' && k)
                             : [],
@@ -404,6 +409,64 @@ export function createScoreStore({ file, log, maxQuestions = MAX_QUESTIONS } = {
         return { ok: true, entry, index: i, saved: flush() };
     }
 
+    // ── owner-contributed emoji puzzles ─────────────────────────────────────
+    /** Emoji strings carry no letters, so dedupe on the raw lowercased art. */
+    const emojiKey = (art) => String(art ?? '').toLowerCase().trim();
+
+    /**
+     * @param {{emoji:string, a:string|string[], by?:string, byKey?:string, chat?:string}} entry
+     * @returns {{ok:boolean, error?:string, entry?:object}}
+     */
+    function addEmojiPuzzle({ emoji, a, by = '', byKey = '', chat = '' } = {}) {
+        const art = clean(emoji, EMOJI_MAX_LEN);
+        const answers = (Array.isArray(a) ? a : [a])
+            .map((s) => clean(s, ANSWER_MAX_LEN))
+            .filter(Boolean);
+        if (!art) return { ok: false, error: 'the emoji part is missing' };
+        if (!answers.length) return { ok: false, error: 'the answer is missing' };
+
+        const normal = emojiKey(art);
+        if (data.emojiQuestions.some((e) => emojiKey(e.emoji) === normal)) {
+            return { ok: false, error: 'that emoji puzzle is already in the pool' };
+        }
+        if (data.emojiQuestions.length >= maxQuestions) {
+            return { ok: false, error: `the pool is full (${maxQuestions} puzzles)` };
+        }
+
+        const entry = {
+            emoji: art,
+            a: answers,
+            by: clean(by, 40),
+            byKey: String(byKey || ''),
+            chat: String(chat || ''),
+            at: new Date().toISOString()
+        };
+        data.emojiQuestions.push(entry);
+        save();
+        return { ok: true, entry };
+    }
+
+    const emojiQuestions = () => data.emojiQuestions;
+
+    /**
+     * Owner: delete one contributed emoji puzzle by its 0-based index
+     * (`!game listemoji` shows the 1-based numbers).
+     * @returns {{ok:boolean, error?:string, entry?:object, index?:number, saved?:boolean}}
+     */
+    function removeEmojiPuzzleAt(index) {
+        const i = Number(index);
+        if (!Number.isInteger(i) || i < 0 || i >= data.emojiQuestions.length) {
+            return {
+                ok: false,
+                error: data.emojiQuestions.length
+                    ? `there is no added emoji puzzle #${i + 1}`
+                    : 'the added-emoji pool is empty'
+            };
+        }
+        const [entry] = data.emojiQuestions.splice(i, 1);
+        return { ok: true, entry, index: i, saved: flush() };
+    }
+
     /**
      * Owner: hide one built-in trivia question so it is never asked again.
      * Built-ins ship with the code, so hiding (persisted here) is the delete.
@@ -512,6 +575,9 @@ export function createScoreStore({ file, log, maxQuestions = MAX_QUESTIONS } = {
         questions,
         findQuestions,
         removeQuestionAt,
+        addEmojiPuzzle,
+        emojiQuestions,
+        removeEmojiPuzzleAt,
         updateQuestionAt,
         hideBuiltinTrivia,
         isBuiltinHidden,
@@ -524,6 +590,9 @@ export function createScoreStore({ file, log, maxQuestions = MAX_QUESTIONS } = {
         },
         get questionCount() {
             return data.questions.length;
+        },
+        get emojiQuestionCount() {
+            return data.emojiQuestions.length;
         },
         get hiddenTriviaCount() {
             return Array.isArray(data.hiddenTrivia) ? data.hiddenTrivia.length : 0;

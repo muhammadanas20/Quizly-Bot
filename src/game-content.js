@@ -1,7 +1,7 @@
 /**
- * src/game-content.js — rotating AI pools for trivia, riddles, scramble, math and code.
+ * src/game-content.js — rotating AI pools for trivia, riddles, emoji, scramble, math and code.
  *
- * Five categories, each generated in its OWN small batch (one request each,
+ * Six categories, each generated in its OWN small batch (one request each,
  * never all at once) so no provider is hit with a big burst:
  *
  *   trivia, scramble   every GAME_AI_TRIVIA_HOURS (5h). If anybody played an
@@ -22,7 +22,7 @@ import path from 'node:path';
 
 import { AiError } from './ai/http.js';
 import { runAI } from './ai/solve.js';
-import { TRIVIA, RIDDLES, WORDS } from './games.js';
+import { TRIVIA, RIDDLES, EMOJI_PUZZLES, EMOJI_CATS, WORDS } from './games.js';
 import { MATH_BANK, CODE_BANK } from './banks.js';
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -31,7 +31,7 @@ const MAX_ITEMS = 40;
 const MAX_FILE_BYTES = 512 * 1024;
 export const BATCH_GAP_MS = 20_000;
 const TICK_MS = 5 * 60 * 1000;
-export const CATEGORIES = Object.freeze(['trivia', 'riddle', 'scramble', 'math', 'code']);
+export const CATEGORIES = Object.freeze(['trivia', 'riddle', 'emoji', 'scramble', 'math', 'code']);
 
 // ─── prompts + schemas ───────────────────────────────────────────────────────
 const QA_SCHEMA = {
@@ -65,7 +65,23 @@ const PUZZLE_SCHEMA = {
     },
     required: ['items']
 };
-export const SCHEMAS = { trivia: QA_SCHEMA, riddle: QA_SCHEMA, scramble: PUZZLE_SCHEMA, math: QA_SCHEMA, code: QA_SCHEMA };
+const EMOJI_SCHEMA = {
+    type: 'object',
+    properties: {
+        items: {
+            type: 'array',
+            items: {
+                type: 'object',
+                properties: {
+                    emoji: { type: 'string' }, a: { type: 'array', items: { type: 'string' } }, cat: { type: 'string' }
+                },
+                required: ['emoji', 'a']
+            }
+        }
+    },
+    required: ['items']
+};
+export const SCHEMAS = { trivia: QA_SCHEMA, riddle: QA_SCHEMA, emoji: EMOJI_SCHEMA, scramble: PUZZLE_SCHEMA, math: QA_SCHEMA, code: QA_SCHEMA };
 
 const QA_RULES = 'Each "a" is an array of 1-4 accepted short spellings (a number, a word or a short expression, never a sentence). '
     + 'Half the items "level":"easy", half "level":"hard". No multiple-choice options. Every question must have ONE unambiguous answer. Keep each value on one line. JSON only, no markdown.';
@@ -79,6 +95,9 @@ Return ONLY {"items":[{"q":"What instrument measures air pressure?","a":["barome
         case 'riddle':
             return `Create ${count} DIFFERENT family-friendly riddles and brain teasers for a WhatsApp group game. Each riddle must have ONE short answer of at most three words (a concrete thing, a word or a number — never a sentence), with 1-4 accepted spellings such as the answer with and without an article. No guessing games about spelling tricks whose only answer is punctuation.
 Return ONLY {"items":[{"q":"What has many keys but can not open a single lock?","a":["piano","a piano"],"level":"easy"}]}. ${QA_RULES}${skip}`;
+        case 'emoji':
+            return `Create ${count} DIFFERENT family-friendly emoji rebus puzzles for a WhatsApp group game. Each puzzle is one short emoji string (1-6 emojis, no letters, no numbers, no flag emojis) that stands for one well-known film, saying, object, place or food. "cat" is one of movie, phrase, thing, place, food.
+Return ONLY {"items":[{"emoji":"🦁👑","a":["the lion king","lion king"],"cat":"movie"}]}. Each "a" is 1-4 accepted spellings, each at most four words. JSON only, no markdown.${skip}`;
         case 'scramble':
             return `Create ${count} DIFFERENT word-scramble puzzles for a WhatsApp group game. Each word: one common English word, letters a-z only, 4-14 letters, not a proper name, with a short helpful clue that does not contain the word. "level" is "easy" for 4-7 letters, "hard" for 8+.
 Return ONLY {"items":[{"word":"metronome","clue":"Helps musicians keep time","level":"hard"}]}. JSON only.${skip}`;
@@ -110,10 +129,22 @@ export function normalizeItems(category, raw, { max = MAX_ITEMS, exclude = [] } 
     const list = Array.isArray(parsed) ? parsed : parsed?.items;
     if (!Array.isArray(list)) return null;
 
-    const seen = new Set(exclude.map((e) => keyOf(typeof e === 'string' ? e : (e.word || e.q))));
+    const seen = new Set(exclude.map((e) => keyOf(typeof e === 'string' ? e : (e.word || e.q || e.emoji))));
     const out = [];
     for (const item of list.slice(0, 128)) {
-        if (category === 'scramble') {
+        if (category === 'emoji') {
+            const art = textOf(item?.emoji);
+            const accepted = Array.isArray(item?.a) ? item.a : [item?.a];
+            const a = [...new Set(accepted.slice(0, 4).map(textOf).filter((x) => x && x.length <= 40))];
+            // Emojis carry no letters, so the dedupe key is the raw lowercased art.
+            const key = art.toLowerCase();
+            if (!art || art.length > 48 || !a.length || !key || seen.has(key)) continue;
+            const cat = textOf(item?.cat).toLowerCase();
+            const entry = { emoji: art, a, cat: EMOJI_CATS.includes(cat) ? cat : 'thing' };
+            if (item?.used) entry.used = true;
+            out.push(entry);
+            seen.add(key);
+        } else if (category === 'scramble') {
             const word = textOf(item?.word).toLowerCase();
             const clue = textOf(item?.clue);
             if (!/^[a-z]{4,16}$/.test(word) || new Set(word).size < 2 || clue.length < 8 || clue.length > 140
@@ -144,6 +175,7 @@ export function normalizeItems(category, raw, { max = MAX_ITEMS, exclude = [] } 
 function builtinsFor(category) {
     if (category === 'trivia') return TRIVIA;
     if (category === 'riddle') return RIDDLES;
+    if (category === 'emoji') return EMOJI_PUZZLES;
     if (category === 'scramble') return WORDS;
     if (category === 'math') return MATH_BANK;
     return CODE_BANK;
@@ -172,7 +204,7 @@ export async function generateBatch({ category, count, config, log, fetchImpl, s
     const cfg = textConfig(config, turn);
     const out = await runAI({
         config: cfg, log, fetchImpl, signal,
-        prompt: contentPrompt(category, n, avoid.map((e) => (typeof e === 'string' ? e : (e.word || e.q)))),
+        prompt: contentPrompt(category, n, avoid.map((e) => (typeof e === 'string' ? e : (e.word || e.q || e.emoji)))),
         maxTokens: Math.min(8000, Math.max(config.aiMaxTokens || 2400, 800 + n * 110)),
         responseSchema: SCHEMAS[category],
         validate: ({ text, truncated }) => {
@@ -196,6 +228,7 @@ export function createGameContentStore({
     const cycleMs = {
         trivia  : (config.gameAiTriviaHours || 5) * HOUR_MS,
         riddle  : (config.gameAiTriviaHours || 5) * HOUR_MS,
+        emoji   : (config.gameAiTriviaHours || 5) * HOUR_MS,
         scramble: (config.gameAiTriviaHours || 5) * HOUR_MS,
         math    : (config.gameAiStudyHours || 10) * HOUR_MS,
         code    : (config.gameAiStudyHours || 10) * HOUR_MS
@@ -203,11 +236,12 @@ export function createGameContentStore({
     const target = {
         trivia  : Math.min(config.gameAiTriviaCount || 16, MAX_ITEMS),
         riddle  : Math.min(config.gameAiTriviaCount || 16, MAX_ITEMS),
+        emoji   : Math.min(config.gameAiTriviaCount || 16, MAX_ITEMS),
         scramble: Math.min(config.gameAiPuzzleCount || 16, MAX_ITEMS),
         math    : Math.min(config.gameAiMathCount || 16, MAX_ITEMS),
         code    : Math.min(config.gameAiCodeCount || 16, MAX_ITEMS)
     };
-    const replaceAll = { trivia: true, riddle: true, scramble: true, math: false, code: false };
+    const replaceAll = { trivia: true, riddle: true, emoji: true, scramble: true, math: false, code: false };
 
     const pools = Object.fromEntries(CATEGORIES.map((c) => [c, { generatedAt: null, items: [] }]));
     const state = Object.fromEntries(CATEGORIES.map((c) => [c, { failures: 0, retryAt: 0 }]));
