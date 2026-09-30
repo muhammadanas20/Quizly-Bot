@@ -165,7 +165,7 @@ test('parseRpsCall accepts hands, shorthand and emoji, rejects the rest', () => 
 });
 
 test('every advertised game can be started by its canonical name', () => {
-    assert.equal(GAMES.length, 9);
+    assert.equal(GAMES.length, 10);
     assert.equal(findGame('dice'), null, 'dice was removed');
     assert.equal(findGame('coin'), null, 'the coin game was removed');
     assert.equal(findGame('lucky'), null, 'the lucky draw was removed');
@@ -904,10 +904,14 @@ test('a pending start or guess cannot award points after a global stop/reset', a
 });
 
 // ── math concepts, programming, modes, member reset ─────────────────────────
-import { MATH_BANK, CODE_BANK, parseTopic } from '../src/banks.js';
+import { MATH_BANK, CODE_BANK, DSMATH_BANK, parseTopic } from '../src/banks.js';
 
 test('concept banks: linear algebra, calculus, mvc and pf/oop/ds/coal at both levels', () => {
-    for (const [bank, topics] of [[MATH_BANK, ['linear', 'calculus', 'mvc']], [CODE_BANK, ['pf', 'oop', 'ds', 'coal']]]) {
+    for (const [bank, topics] of [
+        [MATH_BANK, ['linear', 'calculus', 'mvc']],
+        [CODE_BANK, ['pf', 'oop', 'ds', 'coal']],
+        [DSMATH_BANK, ['logic', 'sets', 'relfun', 'counting', 'numtheory', 'sequences', 'graphs', 'boolalg', 'prob']]
+    ]) {
         assert.equal(new Set(bank.map((e) => e.q)).size, bank.length, 'no duplicate questions');
         for (const t of topics) for (const level of ['easy', 'hard']) {
             assert.ok(bank.some((e) => e.topic === t && e.level === level), `${t}/${level}`);
@@ -916,6 +920,9 @@ test('concept banks: linear algebra, calculus, mvc and pf/oop/ds/coal at both le
     }
     assert.equal(parseTopic(['hard', 'linear'], 'math'), 'linear');
     assert.equal(parseTopic(['asm'], 'code'), 'coal');
+    assert.equal(parseTopic(['hard', 'counting'], 'dsmath'), 'counting');
+    assert.equal(parseTopic(['probability'], 'dsmath'), 'prob');
+    assert.equal(parseTopic(['hard', 'easy'], 'dsmath'), null, 'a level word is not a topic');
 });
 
 test('looseMatches handles symbols, fractions and signs', () => {
@@ -980,6 +987,113 @@ test('AI math/code items are drawn and marked as used', async () => {
     await games.handle(asAli('!game math linear'), ['math', 'linear']);
     assert.equal(games.active(GROUP).pool, aiItem);
     assert.deepEqual(used, [['math', aiItem.q]]);
+});
+
+// ── discrete maths: the !game dsmath subject ────────────────────────────────
+const DSMATH_TOPICS_LIST = ['logic', 'sets', 'relfun', 'counting', 'numtheory', 'sequences', 'graphs', 'boolalg', 'prob'];
+
+test('!game math discrete is the discrete-maths game, not a maths card', async () => {
+    const { games } = world();
+    await games.handle(asAli('!game math discrete hard sets'), ['math', 'discrete', 'hard', 'sets']);
+    const round = games.active(GROUP);
+    assert.equal(round.name, 'dsmath');
+    assert.equal(round.pool.topic, 'sets');
+    assert.equal(round.pool.level, 'hard');
+    assert.match(round.accepted[0], /.+/);
+});
+
+test('!game dsmath draws from the discrete-maths bank and a plain reply wins', async () => {
+    const { games, scores } = world();
+    const start = await games.handle(asAli('!game dsmath'), ['dsmath']);
+    const round = games.active(GROUP);
+    assert.equal(round.name, 'dsmath');
+    assert.ok(DSMATH_BANK.includes(round.pool), 'a verified built-in card');
+    assert.match(start.reply, /🧮 \*(.*) · (Easy|Hard)\*/);
+    assert.deepEqual(await games.handleMessage(asSana('anyone free tonight?')), { handled: false }, 'chat is ignored');
+
+    const win = await games.handleMessage(asAli(round.accepted[0]));
+    assert.equal(win.react, '🎉');
+    assert.equal(round.problem.concept, true);
+    assert.equal(scores.playerOf(GROUP, [PN]).points, 6, 'card points + the participation point');
+    assert.equal(findGame('discrete').name, 'dsmath');
+    assert.equal(findGame('dm').name, 'dsmath');
+});
+
+test('!game dsmath <level> <topic> stays on every topic of the subject', async () => {
+    const { games } = world();
+    for (const topic of DSMATH_TOPICS_LIST) {
+        for (const level of ['easy', 'hard']) {
+            const start = await games.handle(asAli(`!game dsmath ${level} ${topic}`), ['dsmath', level, topic]);
+            const round = games.active(GROUP);
+            assert.equal(round.pool.topic, topic, topic);
+            assert.equal(round.pool.level, level, `${topic}/${level}`);
+            assert.equal(round.problem.points, level === 'hard' ? 10 : 5, `${topic}/${level} payout`);
+            assert.match(start.reply, new RegExp(`${level === 'hard' ? 'Hard' : 'Easy'}\\*`));
+        }
+    }
+    games.close();
+});
+
+test('dsmath follows the chat mode; all mode mixes levels and each card pays its own points', async () => {
+    const { games, scores } = world();
+    await games.handle(asAli('!game mode hard'), ['mode', 'hard']);
+    await games.handle(asAli('!game dsmath'), ['dsmath']);
+    assert.equal(games.active(GROUP).pool.level, 'hard', 'the chat mode covers dsmath too');
+    assert.equal(games.active(GROUP).problem.points, 10);
+    assert.equal(scores.modeOf(OTHER), 'easy', 'other chats are untouched');
+
+    const set = await games.handle(asAli('!game mode all'), ['mode', 'all']);
+    assert.match(set.reply, /now \*all\*/);
+    assert.equal(scores.modeOf(GROUP), 'all', 'mixed mode persists like easy and hard');
+
+    const seen = new Set();
+    for (const value of [0.01, 0.2, 0.4, 0.6, 0.8, 0.99]) {
+        const one = world({ random: () => value });
+        await one.games.handle(asAli('!game mode all'), ['mode', 'all']);
+        await one.games.handle(asAli('!game dsmath'), ['dsmath']);
+        const round = one.games.active(GROUP);
+        assert.ok(['easy', 'hard'].includes(round.pool.level), 'only real cards are drawn');
+        assert.equal(round.problem.points, round.pool.level === 'hard' ? 10 : 5, 'no easy card pays 10');
+        seen.add(round.pool.level);
+    }
+    assert.deepEqual([...seen].sort(), ['easy', 'hard'], 'mixed mode really mixes');
+});
+
+test('a stuck dsmath round gets the first-letter hint, like the code game', async () => {
+    const { games } = world();
+    await games.handle(asAli('!game dsmath'), ['dsmath']);
+    const round = games.active(GROUP);
+    let out;
+    for (let i = 0; i < 4; i++) out = await games.guess(asAli(`!guess nonsense ${i}`), ['nonsense', String(i)]);
+    assert.match(out.reply, new RegExp(`💡 The answer starts with \\*${round.accepted[0][0].toUpperCase()}`));
+});
+
+test('AI discrete-maths items join the pool, are drawn and are marked as used', async () => {
+    const used = [];
+    const aiItem = { q: 'How many edges does a tree with 7 vertices have?', a: ['6'], level: 'easy', topic: 'graphs' };
+    const content = { items: (c) => (c === 'dsmath' ? [aiItem] : []), markUsed: (c, i) => used.push([c, i.q]) };
+    const { games } = world({ random: () => 0.9999, content });
+    await games.handle(asAli('!game dsmath easy graphs'), ['dsmath', 'easy', 'graphs']);
+    assert.equal(games.active(GROUP).pool, aiItem);
+    assert.deepEqual(used, [['dsmath', aiItem.q]]);
+});
+
+test('!game add new dsmath generates into the discrete-maths pool (owner only)', async () => {
+    const asked = [];
+    const content = {
+        generateAndAdd: async (category, topic) => {
+            asked.push([category, topic]);
+            return [{ q: 'How many rows does a truth table with three variables have?', a: ['8'], level: 'easy', topic: 'logic' }];
+        }
+    };
+    const { games } = world({ content });
+    assert.equal((await games.handle(asAli('!game add new dsmath'), ['add', 'new', 'dsmath'])).react, '⛔');
+
+    const out = await games.handle(asAli('!game add new dsmath', { isOwner: true }), ['add', 'new', 'dsmath']);
+    assert.equal(out.react, '✅');
+    assert.match(out.reply, /added 1 new dsmath question/);
+    await games.handle(asAli('!game add new logic', { isOwner: true }), ['add', 'new', 'logic']);
+    assert.deepEqual(asked, [['dsmath', null], ['dsmath', 'logic']]);
 });
 
 test('!game reset @member: owner only, clears one member in this chat (or all chats)', async () => {

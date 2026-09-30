@@ -1,14 +1,15 @@
 /**
- * src/game-content.js — rotating AI pools for trivia, riddles, emoji, scramble, math and code.
+ * src/game-content.js — rotating AI pools for trivia, riddles, emoji, scramble,
+ * math, code and discrete maths.
  *
- * Six categories, each generated in its OWN small batch (one request each,
+ * Seven categories, each generated in its OWN small batch (one request each,
  * never all at once) so no provider is hit with a big burst:
  *
  *   trivia, scramble   every GAME_AI_TRIVIA_HOURS (5h). If anybody played an
  *                      AI item since the last refresh, the WHOLE pool is
  *                      replaced with a fresh batch. Untouched pools are kept
  *                      and no quota is spent.
- *   math, code         every GAME_AI_STUDY_HOURS (10h). Only items that were
+ *   math, code, dsmath every GAME_AI_STUDY_HOURS (10h). Only items that were
  *                      used are replaced; unused ones stay.
  *
  * Batches run one at a time with BATCH_GAP_MS between requests, and each batch
@@ -23,7 +24,7 @@ import path from 'node:path';
 import { AiError } from './ai/http.js';
 import { runAI } from './ai/solve.js';
 import { TRIVIA, RIDDLES, EMOJI_PUZZLES, EMOJI_CATS, WORDS } from './games.js';
-import { MATH_BANK, CODE_BANK } from './banks.js';
+import { MATH_BANK, CODE_BANK, DSMATH_BANK, DSMATH_TOPICS } from './banks.js';
 
 const HOUR_MS = 60 * 60 * 1000;
 export const CONTENT_DAY_MS = 24 * HOUR_MS;
@@ -31,7 +32,7 @@ const MAX_ITEMS = 40;
 const MAX_FILE_BYTES = 512 * 1024;
 export const BATCH_GAP_MS = 20_000;
 const TICK_MS = 5 * 60 * 1000;
-export const CATEGORIES = Object.freeze(['trivia', 'riddle', 'emoji', 'scramble', 'math', 'code']);
+export const CATEGORIES = Object.freeze(['trivia', 'riddle', 'emoji', 'scramble', 'math', 'code', 'dsmath']);
 
 // ─── prompts + schemas ───────────────────────────────────────────────────────
 const QA_SCHEMA = {
@@ -81,7 +82,7 @@ const EMOJI_SCHEMA = {
     },
     required: ['items']
 };
-export const SCHEMAS = { trivia: QA_SCHEMA, riddle: QA_SCHEMA, emoji: EMOJI_SCHEMA, scramble: PUZZLE_SCHEMA, math: QA_SCHEMA, code: QA_SCHEMA };
+export const SCHEMAS = { trivia: QA_SCHEMA, riddle: QA_SCHEMA, emoji: EMOJI_SCHEMA, scramble: PUZZLE_SCHEMA, math: QA_SCHEMA, code: QA_SCHEMA, dsmath: QA_SCHEMA };
 
 const QA_RULES = 'Each "a" is an array of 1-4 accepted short spellings (a number, a word or a short expression, never a sentence). '
     + 'Half the items "level":"easy", half "level":"hard". No multiple-choice options. Every question must have ONE unambiguous answer. Keep each value on one line. JSON only, no markdown.';
@@ -107,6 +108,9 @@ Return ONLY {"items":[{"q":"What is the determinant of [[2,1],[3,4]]?","a":["5"]
         case 'code':
             return `Create ${count} DIFFERENT computer-science quiz questions for students: programming fundamentals in C/C++ (pf), object-oriented programming (oop), data structures and complexity (ds), and computer organization & assembly language — 8086/x86 registers, flags, instructions, addressing (coal). Spread evenly across the four topics.
 Return ONLY {"items":[{"q":"Which data structure follows LIFO?","a":["stack"],"level":"easy","topic":"ds"}]}. "topic" is one of pf, oop, ds, coal. ${QA_RULES}${skip}`;
+        case 'dsmath':
+            return `Create ${count} DIFFERENT discrete-mathematics quiz questions for computer-science students, spread evenly over these topics: propositional and predicate logic (logic: truth tables, connectives, tautology, implications, quantifiers), sets (sets: union, intersection, complement, power set, Cartesian product, Venn/inclusion-exclusion word problems), relations and functions (relfun: reflexive/symmetric/transitive, equivalence relations, injections/surjections/bijections, counting relations), counting and combinatorics (counting: factorials, permutations, combinations, the pigeonhole principle), number theory and modular arithmetic (numtheory: divisibility, primes, gcd/lcm, mod, base conversion, Euler's totient), sequences and recurrences (sequences: arithmetic and geometric progressions, Fibonacci, solving a small recurrence, sums of series), graph theory and trees (graphs: degree and the handshaking lemma, complete graphs, trees and their edges, Euler and Hamilton paths, planar graphs and colouring) and Boolean algebra and logic gates (boolalg: gates, XOR, De Morgan, simplification, minterms). Discrete probability (prob: dice, cards, coins, mutually exclusive events) also counts. Numeric answers must be exact integers or simple fractions like 1/2, and answers that fit in a chat message.
+Return ONLY {"items":[{"q":"How many edges does a tree with 7 vertices have?","a":["6"],"level":"easy","topic":"graphs"}]}. "topic" is one of ${DSMATH_TOPICS.join(', ')}. ${QA_RULES}${skip}`;
         default:
             throw new Error(`unknown category ${category}`);
     }
@@ -116,7 +120,7 @@ Return ONLY {"items":[{"q":"Which data structure follows LIFO?","a":["stack"],"l
 const textOf = (v) => typeof v === 'string' ? v.replace(/[\x00-\x1f\x7f]/g, ' ').replace(/\s+/g, ' ').trim() : '';
 export const keyOf = (s) => String(s || '').toLowerCase().normalize('NFKD').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 const levelOf = (v) => (String(v || '').toLowerCase() === 'hard' ? 'hard' : 'easy');
-const TOPICS = { math: ['linear', 'calculus', 'mvc'], code: ['pf', 'oop', 'ds', 'coal'] };
+const TOPICS = { math: ['linear', 'calculus', 'mvc'], code: ['pf', 'oop', 'ds', 'coal'], dsmath: [...DSMATH_TOPICS] };
 
 /** Parse and clean one category's items. Returns an array (possibly empty) or null for unparseable input. */
 export function normalizeItems(category, raw, { max = MAX_ITEMS, exclude = [] } = {}) {
@@ -178,6 +182,7 @@ function builtinsFor(category) {
     if (category === 'emoji') return EMOJI_PUZZLES;
     if (category === 'scramble') return WORDS;
     if (category === 'math') return MATH_BANK;
+    if (category === 'dsmath') return DSMATH_BANK;
     return CODE_BANK;
 }
 
@@ -231,7 +236,8 @@ export function createGameContentStore({
         emoji   : (config.gameAiTriviaHours || 5) * HOUR_MS,
         scramble: (config.gameAiTriviaHours || 5) * HOUR_MS,
         math    : (config.gameAiStudyHours || 10) * HOUR_MS,
-        code    : (config.gameAiStudyHours || 10) * HOUR_MS
+        code    : (config.gameAiStudyHours || 10) * HOUR_MS,
+        dsmath  : (config.gameAiStudyHours || 10) * HOUR_MS
     };
     const target = {
         trivia  : Math.min(config.gameAiTriviaCount || 16, MAX_ITEMS),
@@ -239,9 +245,10 @@ export function createGameContentStore({
         emoji   : Math.min(config.gameAiTriviaCount || 16, MAX_ITEMS),
         scramble: Math.min(config.gameAiPuzzleCount || 16, MAX_ITEMS),
         math    : Math.min(config.gameAiMathCount || 16, MAX_ITEMS),
-        code    : Math.min(config.gameAiCodeCount || 16, MAX_ITEMS)
+        code    : Math.min(config.gameAiCodeCount || 16, MAX_ITEMS),
+        dsmath  : Math.min(config.gameAiDsmathCount || 16, MAX_ITEMS)
     };
-    const replaceAll = { trivia: true, riddle: true, emoji: true, scramble: true, math: false, code: false };
+    const replaceAll = { trivia: true, riddle: true, emoji: true, scramble: true, math: false, code: false, dsmath: false };
 
     const pools = Object.fromEntries(CATEGORIES.map((c) => [c, { generatedAt: null, items: [] }]));
     const state = Object.fromEntries(CATEGORIES.map((c) => [c, { failures: 0, retryAt: 0 }]));
@@ -506,7 +513,7 @@ export function createGameContentStore({
         const avoid = [...builtinsFor(category), ...pools[category].items];
         const batch = await generate({ category, count: Math.min(8, target[category] || 8), config, log, fetchImpl, avoid });
         let additions = batch || [];
-        if (topic && ['math', 'code'].includes(category)) additions = additions.filter((item) => item.topic === topic);
+        if (topic && ['math', 'code', 'dsmath'].includes(category)) additions = additions.filter((item) => item.topic === topic);
         additions = additions.filter((item) => !pools[category].items.some((old) => keyOf(old.q || old.word) === keyOf(item.q || item.word)));
         if (!additions.length) throw new Error('AI returned no new valid questions for that module');
         pools[category].items.push(...additions);

@@ -8,7 +8,7 @@
  *   !game on                   owner: reopen games for everyone
  *   !game reset tops           owner: clear every leaderboard
  *   !game reset @member [all]  owner: reset one member's points (this chat / all chats)
- *   !game mode easy|hard       set this chat's default level for math + code
+ *   !game mode easy|hard|all   set this chat's default level for maths games
  *   !game end                  end this chat's round (starter or owner)
  *   !game top [all]            leaderboard — this chat, or everywhere
  *   !game me                   your own score card
@@ -21,7 +21,7 @@
  *   !game listemoji            owner: list the added emoji puzzles
  *   !game restore              owner: bring back hidden built-ins, clear modified answers
  *
- * Nine games: number, riddle, emoji, rps, math, code, scramble, trivia, react.
+ * Ten games: number, riddle, emoji, rps, math, code, dsmath, scramble, trivia, react.
  * Everyone plays, everyone scores (every attempt earns a participation point),
  * and the scoreboard is per group so a big group's leaderboard means something.
  *
@@ -37,7 +37,7 @@
 import { questionText, roundCard, GAME_GUIDE } from './presentation.js';
 
 import { randomInt, pickOne, shuffle, parseRange } from './random.js';
-import { MATH_BANK, CODE_BANK, parseTopic } from './banks.js';
+import { MATH_BANK, CODE_BANK, DSMATH_BANK, DSMATH_TOPICS, parseTopic } from './banks.js';
 import { normalizeId } from './config.js';
 import { questionKey } from './scores.js';
 
@@ -317,6 +317,7 @@ export const GAME_POINTS = Object.freeze({
     react  : 8,
     math   : 5,
     code   : 5,
+    dsmath : 5,
     scramble: 5,
     trivia : 5
 });
@@ -408,14 +409,20 @@ export const GAMES = Object.freeze([
     {
         name: 'math', aliases: ['math', 'maths', 'sum', 'calc'], emoji: '➗', mode: 'race',
         title: 'Maths', points: GAME_POINTS.math,
-        how: '!game math [easy|hard] [linear|calc|mvc|arith] → send the answer',
+        how: '!game math [easy|hard|all] [linear|calc|mvc|arith] → send the answer',
         blurb: 'Arithmetic plus linear algebra, calculus and multivariable calculus. 5 easy / 10 hard.'
     },
     {
         name: 'code', aliases: ['code', 'programming', 'prog', 'coding', 'cs', 'coal', 'asm'], emoji: '💻', mode: 'race',
         title: 'Programming', points: GAME_POINTS.code,
-        how: '!game code [easy|hard] [pf|oop|ds|coal] → send the answer',
+        how: '!game code [easy|hard|all] [pf|oop|ds|coal] → send the answer',
         blurb: 'PF, OOP, data structures and COAL assembly/registers. 5 easy / 10 hard.'
+    },
+    {
+        name: 'dsmath', aliases: ['dsmath', 'discrete', 'discretemath', 'dmath', 'dm'], emoji: '🧮', mode: 'race',
+        title: 'Discrete maths', points: GAME_POINTS.dsmath,
+        how: '!game dsmath [easy|hard|all] [topic] → send the answer',
+        blurb: 'Logic, sets, relations, counting, number theory, sequences, graphs, Boolean algebra. 5 easy / 10 hard.'
     },
     {
         name: 'scramble', aliases: ['scramble', 'word', 'unscramble', 'anagram'], emoji: '🔤', mode: 'race',
@@ -442,6 +449,9 @@ const BY_ALIAS = new Map(GAMES.flatMap((g) => g.aliases.map((a) => [a, g])));
 export function findGame(nameOrAlias) {
     return BY_ALIAS.get(String(nameOrAlias || '').toLowerCase().trim()) || null;
 }
+
+/** What `!game mode <x>` accepts; 'mixed' is a friendlier spelling of 'all'. */
+const GAME_MODE_WORDS = Object.freeze({ easy: 'easy', hard: 'hard', all: 'all', mixed: 'all' });
 
 const points = (n) => `*+${n}* ${n === 1 ? 'pt' : 'pts'}`;
 const pt = (n) => `${n} ${n === 1 ? 'pt' : 'pts'}`;
@@ -625,6 +635,7 @@ const REVEAL = {
     react   : (r) => `the emoji was *${r.targetEmoji || r.answer}*`,
     math    : (r) => `the answer was *${r.accepted ? r.accepted[0] : r.answer}*`,
     code    : (r) => `the answer was *${r.accepted[0]}*`,
+    dsmath  : (r) => `the answer was *${r.accepted[0]}*`,
     scramble: (r) => `the word was *${r.answer}*`,
     trivia  : (r) => `the answer was *${r.accepted[0]}*`
 };
@@ -739,10 +750,11 @@ export function createGameEngine({
             enabled ? '' : '🌙 Games are paused. Owner: !game on',
             ...GAMES.map((g) => `${g.emoji} *${g.name}* — ${g.blurb}`), '',
             'Start with !game <name>',
-            'Math/code: add easy or hard.',
+            'Maths games: add easy, hard or all (mixed).',
             'Code topics: pf · oop · ds · coal',
-            'Math topics: linear · calc · mvc · arith', '',
-            'Example: !game code easy ds',
+            'Math topics: linear · calc · mvc · arith',
+            `Discrete topics: ${DSMATH_TOPICS.join(' · ')}`, '',
+            'Example: !game code easy ds · !game dsmath hard counting',
             '!top for scores · !game help for rules and controls'
         ].join('\n');
     }
@@ -755,7 +767,7 @@ export function createGameEngine({
             'Your first eligible attempt earns a participation point.',
             'Wins earn game points; streaks can add a bonus.', '',
             ...GAMES.map((g) => `${g.emoji} *${g.name}* · ${g.points} pts\n${g.how}`), '',
-            'Math/code hard mode pays 10 pts. Number rewards fall with wrong guesses.',
+            'Hard maths cards pay 10 pts, easy ones 5. Number rewards fall with wrong guesses.',
             'Rounds end when time runs out. Wrong guesses may get hints.', '',
             GAME_GUIDE
         ].join('\n');
@@ -884,22 +896,29 @@ export function createGameEngine({
             }
 
             case 'math': {
+                // `!game math discrete` / `!game math dsmath` is the same subject
+                // the dedicated game plays — route there instead of asking maths.
+                if (/\b(dsmath|discrete)\b/i.test((args || []).join(' '))) {
+                    return build(ctx, findGame('dsmath'), args, round.starterKey, round.starterLabel);
+                }
                 const level = levelFrom(ctx.jid, args);
                 const topic = parseTopic(args, 'math');
                 const concept = topic === 'arithmetic' ? null
                     : (topic || random() < 0.6) ? pickConcept('math', level, topic, ctx.jid) : null;
-                const points = level === 'hard' ? 10 : GAME_POINTS.math;
                 if (concept) {
+                    // In mixed mode the drawn card decides the payout, so an
+                    // easy card never pays like a hard one.
+                    const points = concept.level === 'hard' ? 10 : GAME_POINTS.math;
                     round.pool = concept;
                     round.accepted = concept.a;
-                    round.problem = { question: concept.q, level, points, concept: true };
+                    round.problem = { question: concept.q, level: concept.level, points, concept: true };
                     return {
                         round,
-                        text: `${game.emoji} *Math · ${TOPIC_LABEL[concept.topic] || concept.topic}*\n${level} · ${points} pts\n\n`
+                        text: `${game.emoji} *Math · ${TOPIC_LABEL[concept.topic] || concept.topic}*\n${concept.level} · ${points} pts\n\n`
                             + questionText(concept) + tail
                     };
                 }
-                const problem = makeMath(level, random);
+                const problem = makeMath(level === 'all' ? (random() < 0.5 ? 'hard' : 'easy') : level, random);
                 round.answer = problem.answer;
                 round.problem = problem;
                 return {
@@ -909,26 +928,11 @@ export function createGameEngine({
                 };
             }
 
-            case 'code': {
-                const level = levelFrom(ctx.jid, args);
-                const topic = parseTopic(args, 'code');
-                const entry = pickConcept('code', level, topic, ctx.jid);
-                if (!entry) return { error: 'No programming questions for that topic yet.' };
-                const points = level === 'hard' ? 10 : GAME_POINTS.code;
-                round.pool = entry;
-                round.accepted = entry.a;
-                round.problem = { question: entry.q, level, points, concept: true };
-                return {
-                    round,
-                    text: roundCard({
-                        emoji: game.emoji,
-                        title: `${TOPIC_LABEL[entry.topic] || 'Programming'} · ${level === 'hard' ? 'Hard' : 'Easy'}`,
-                        detail: `${points} pts · ${left}s`,
-                        question: questionText(entry),
-                        footer: 'Send your answer.\n!game end to end your round · !top for scores'
-                    })
-                };
-            }
+            case 'code':
+                return conceptCard(round, game, 'code', ctx, args);
+
+            case 'dsmath':
+                return conceptCard(round, game, 'dsmath', ctx, args);
 
             case 'scramble': {
                 const puzzle = pickPuzzle(ctx.jid);
@@ -982,7 +986,10 @@ export function createGameEngine({
 
     const TOPIC_LABEL = {
         linear: 'linear algebra', calculus: 'calculus', mvc: 'multivariable calculus',
-        pf: 'programming fundamentals', oop: 'OOP', ds: 'Data structures', coal: 'COAL / assembly'
+        pf: 'programming fundamentals', oop: 'OOP', ds: 'Data structures', coal: 'COAL / assembly',
+        logic: 'Logic', sets: 'Sets', relfun: 'Relations & functions', counting: 'Counting',
+        numtheory: 'Number theory', sequences: 'Sequences & recurrences', graphs: 'Graph theory',
+        boolalg: 'Boolean algebra', prob: 'Probability'
     };
     const lastQuestion = new Map();   // jid → { at, value }
     const lastRiddle = new Map();     // jid → { at, value }
@@ -1041,11 +1048,11 @@ export function createGameEngine({
 
     const lastConcept = new Map();   // "jid|kind" → { at, value }
 
-    /** Built-in bank + AI pool for math/code, filtered by level and topic. */
+    /** Built-in bank + AI pool for math/code/dsmath, filtered by level and topic. */
     function pickConcept(kind, level, topic, jid) {
-        const bank = kind === 'math' ? MATH_BANK : CODE_BANK;
+        const bank = kind === 'math' ? MATH_BANK : kind === 'code' ? CODE_BANK : DSMATH_BANK;
         const ai = content?.items?.(kind) || [];
-        const fits = (e) => e.level === level && (!topic || e.topic === topic);
+        const fits = (e) => (level === 'all' || e.level === level) && (!topic || e.topic === topic);
         let pool = [...bank.filter(fits), ...ai.filter(fits)];
         if (!pool.length) pool = [...bank, ...ai].filter((e) => !topic || e.topic === topic);
         if (!pool.length) return null;
@@ -1056,12 +1063,40 @@ export function createGameEngine({
         return picked;
     }
 
-    /** "hard"/"easy" typed in the command wins; otherwise the chat's mode. */
+    /**
+     * "hard"/"easy"/"all" typed in the command wins; otherwise the chat's mode.
+     * `all` is mixed: the level of the card actually drawn decides the payout.
+     */
     function levelFrom(jid, args) {
         const text = (args || []).join(' ');
         if (/\b(hard|difficult)\b/i.test(text)) return 'hard';
         if (/\b(easy|simple)\b/i.test(text)) return 'easy';
+        if (/\b(all|mixed|any)\b/i.test(text)) return 'all';
         return scores?.modeOf?.(jid) || 'easy';
+    }
+
+    /** One round of a concept game (code, dsmath): one card from bank + AI pool. */
+    function conceptCard(round, game, kind, ctx, args) {
+        const subject = kind === 'code' ? 'programming' : 'discrete maths';
+        const level = levelFrom(ctx.jid, args);
+        const topic = parseTopic(args, kind);
+        const entry = pickConcept(kind, level, topic, ctx.jid);
+        if (!entry) return { error: `No ${subject} questions for that topic yet.` };
+        const points = entry.level === 'hard' ? 10 : GAME_POINTS[kind];
+        const left = Math.round(timeoutMs / 1000);
+        round.pool = entry;
+        round.accepted = entry.a;
+        round.problem = { question: entry.q, level: entry.level, points, concept: true };
+        return {
+            round,
+            text: roundCard({
+                emoji: game.emoji,
+                title: `${TOPIC_LABEL[entry.topic] || game.title} · ${entry.level === 'hard' ? 'Hard' : 'Easy'}`,
+                detail: `${points} pts · ${left}s`,
+                question: questionText(entry),
+                footer: 'Send your answer.\n!game end to end your round · !top for scores'
+            })
+        };
     }
 
     // ── attempts ─────────────────────────────────────────────────────────────
@@ -1086,7 +1121,8 @@ export function createGameEngine({
             case 'math':     return round.accepted
                 ? `💡 The answer starts with *${String(round.accepted[0])[0].toUpperCase()}*`
                 : `💡 The answer is ${round.answer % 2 === 0 ? 'even' : 'odd'}`;
-            case 'code':     return `💡 The answer starts with *${String(round.accepted[0])[0].toUpperCase()}* (${String(round.accepted[0]).length} chars)`;
+            case 'code':
+            case 'dsmath':   return `💡 The answer starts with *${String(round.accepted[0])[0].toUpperCase()}* (${String(round.accepted[0]).length} chars)`;
             default:         return '';
         }
     }
@@ -1225,6 +1261,7 @@ export function createGameEngine({
             }
 
             case 'code':
+            case 'dsmath':
             case 'math': {
                 if (round.accepted) {
                     // concept question: symbols matter, so use the loose matcher
@@ -1376,9 +1413,9 @@ export function createGameEngine({
         const line = st
             ? Object.entries(st).map(([c, v]) => `${c} ${v.count}${v.used ? ` (${v.used} played)` : ''}`).join(' · ')
             : `trivia ${content?.questionCount || 0} · scramble ${content?.puzzleCount || 0}`;
-        const hours = st ? `\n_trivia/scramble renew every ${st.trivia.everyHours}h if played · math/code replace played questions every ${st.math.everyHours}h_` : '';
+        const hours = st ? `\n_trivia/scramble renew every ${st.trivia.everyHours}h if played · maths pools replace played questions every ${st.math.everyHours}h_` : '';
         return `🎮 *Game status*\n\nGames: *${enabled ? 'ON' : 'OFF'}*\nActive rounds: ${rounds.size} · ${cooldownMs / 1000}s between rounds\n`
-            + `🎚️ Math/code mode here: *${scores?.modeOf?.(ctx?.jid) || 'easy'}*\n`
+            + `🎚️ Maths mode here (math · code · dsmath): *${scores?.modeOf?.(ctx?.jid) || 'easy'}*\n`
             + `\n*Question pools*\nAI pool: ${line}${hours}`;
     }
 
@@ -1427,9 +1464,14 @@ export function createGameEngine({
         if (sub === 'add' && String(args[1] || '').toLowerCase() === 'new') {
             if (!ctx.isOwner) return ownerOnly();
             const moduleName = String(args[2] || '').toLowerCase();
-            const aliases = { coal: ['code', 'coal'], pf: ['code', 'pf'], oop: ['code', 'oop'], ds: ['code', 'ds'], trivia: ['trivia', null], riddle: ['riddle', null], emoji: ['emoji', null], math: ['math', null], calculus: ['math', 'calculus'], mvc: ['math', 'mvc'], linear: ['math', 'linear'], scramble: ['scramble', null] };
+            const aliases = { coal: ['code', 'coal'], pf: ['code', 'pf'], oop: ['code', 'oop'], ds: ['code', 'ds'], trivia: ['trivia', null], riddle: ['riddle', null], emoji: ['emoji', null], math: ['math', null], calculus: ['math', 'calculus'], mvc: ['math', 'mvc'], linear: ['math', 'linear'], scramble: ['scramble', null],
+                dsmath: ['dsmath', null], discrete: ['dsmath', null], dmath: ['dsmath', null],
+                logic: ['dsmath', 'logic'], sets: ['dsmath', 'sets'], relfun: ['dsmath', 'relfun'],
+                counting: ['dsmath', 'counting'], numtheory: ['dsmath', 'numtheory'], numbertheory: ['dsmath', 'numtheory'],
+                sequences: ['dsmath', 'sequences'], graphs: ['dsmath', 'graphs'], boolalg: ['dsmath', 'boolalg'],
+                boolean: ['dsmath', 'boolalg'], prob: ['dsmath', 'prob'], probability: ['dsmath', 'prob'] };
             const picked = aliases[moduleName];
-            if (!picked) return { handled: true, react: '⚠️', reply: 'Try it like this: `!game add new coal|pf|oop|ds|trivia|riddle|emoji|math|scramble`' };
+            if (!picked) return { handled: true, react: '⚠️', reply: 'Try it like this: `!game add new coal|pf|oop|ds|dsmath|logic|trivia|riddle|emoji|math|scramble`' };
             try {
                 const added = await content?.generateAndAdd?.(...picked);
                 if (!added?.length) throw new Error('question generator is unavailable');
@@ -1440,15 +1482,22 @@ export function createGameEngine({
         }
         if (sub === 'status') return { handled: true, reply: statusText(ctx) };
         if (sub === 'mode' || sub === 'level' || sub === 'difficulty') {
+            const current = scores?.modeOf?.(ctx.jid) || 'easy';
             const want = String(args[1] || '').toLowerCase();
-            if (!['easy', 'hard'].includes(want)) {
-                return { handled: true, reply: `🎚️ Math/code mode here is *${scores?.modeOf?.(ctx.jid) || 'easy'}*. Change it: \`!game mode easy\` or \`!game mode hard\`` };
+            if (!GAME_MODE_WORDS[want]) {
+                return {
+                    handled: true,
+                    reply: `🎚️ Maths mode here is *${current}*. Change it: \`!game mode easy\`, \`!game mode hard\` `
+                        + 'or `!game mode all` (mixed — every level is drawn, and each card pays its own points).'
+                };
             }
-            const saved = scores?.setMode?.(ctx.jid, want);
+            const mode = GAME_MODE_WORDS[want];
+            const saved = scores?.setMode?.(ctx.jid, mode);
+            const payout = mode === 'hard' ? '10 pts' : mode === 'all' ? '5 pts on easy cards, 10 on hard ones' : '5 pts';
             return {
-                handled: true, react: want === 'hard' ? '🔥' : '🌱',
-                reply: `🎚️ Math and code rounds in this chat are now *${want}* (${want === 'hard' ? 10 : 5} pts). `
-                    + 'You can still override one round: `!game math easy`, `!game code hard`.'
+                handled: true, react: mode === 'hard' ? '🔥' : mode === 'all' ? '🎲' : '🌱',
+                reply: `🎚️ Math, code and discrete-maths rounds in this chat are now *${mode}* (${payout}). `
+                    + 'You can still override one round: `!game math easy`, `!game code hard`, `!game dsmath all`.'
                     + (saved === false ? '\n⚠️ Could not save this setting.' : '')
             };
         }
@@ -1721,6 +1770,7 @@ export function createGameEngine({
                 return /^-?\d+$/.test(text) ? takeAttempt(ctx, text, false) : { handled: false };
             case 'math':
             case 'code':
+            case 'dsmath':
                 if (round.accepted) {
                     // like trivia: only a correct answer interrupts the chat
                     return text.length <= 60 && looseMatches(text, round.accepted)

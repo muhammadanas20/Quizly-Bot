@@ -16,8 +16,9 @@ export function roundCard({ emoji, title, detail, question, footer }) {
 export const GAME_GUIDE = [
     '*Rounds*',
     '!game <name> — start a round',
+    '!game dsmath [easy|hard|all] <topic> — discrete maths',
     '!guess <answer> — or just send your answer',
-    '!game mode easy|hard — default math/code difficulty',
+    '!game mode easy|hard|all — default difficulty for maths games',
     '!game end — end your round',
     '!game status — availability and question pools', '',
     '*Scores*',
@@ -34,6 +35,6 @@ export const GAME_GUIDE = [
     '!game modify Question ; New answer',
     '!game delete Question · !game deleteemoji <#>',
     '!game restore',
-    '!game add new ds',
-    'Generation topics: pf · oop · ds · coal · trivia · riddle · emoji · math · scramble'
+    '!game add new ds · !game add new dsmath',
+    'Generation topics: pf · oop · ds · coal · dsmath · trivia · riddle · emoji · math · scramble'
 ].join('\n');

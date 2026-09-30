@@ -1,5 +1,6 @@
 /**
- * src/banks.js — built-in concept question banks for !game math and !game code.
+ * src/banks.js — built-in concept question banks for !game math, !game code
+ * and !game dsmath.
  *
  * Every entry: { q, a:[accepted answers], level:'easy'|'hard', topic }.
  * Answers are short and unambiguous so they can be typed in a chat.
@@ -7,6 +8,7 @@
  */
 
 import { DS_QUESTIONS } from './ds-questions.js';
+import { DSMATH_QUESTIONS } from './dsmath-questions.js';
 
 const E = 'easy', H = 'hard';
 const q = (topic, level, question, ...a) => ({ q: question, a, level, topic });
@@ -179,15 +181,48 @@ export const CODE_BANK = Object.freeze([
     q('coal', H, 'Which addressing mode is used in MOV AX, [BX]?', 'register indirect', 'indirect')
 ]);
 
-/** Parse a topic keyword typed after !game math / !game code. */
+// ─── Discrete mathematics: logic, sets, relations, counting, graphs, … ──────
+export const DSMATH_TOPICS = Object.freeze([
+    'logic', 'sets', 'relfun', 'counting', 'numtheory', 'sequences', 'graphs', 'boolalg', 'prob'
+]);
+
+/**
+ * The whole subject ships as one curated list — `src/dsmath-questions.js` holds
+ * the 54 verified cards (27 easy, 27 hard, six for every topic) so the numbers
+ * can be re-checked in one place.
+ */
+export const DSMATH_BANK = Object.freeze([...DSMATH_QUESTIONS]);
+
+/** Parse a topic keyword typed after !game math / !game code / !game dsmath. */
+const TOPIC_WORDS = {
+    math: { linear: 'linear', la: 'linear', matrix: 'linear', matrices: 'linear', vector: 'linear', vectors: 'linear',
+        calc: 'calculus', calculus: 'calculus', mvc: 'mvc', multivariable: 'mvc', multi: 'mvc',
+        arith: 'arithmetic', arithmetic: 'arithmetic', sums: 'arithmetic' },
+    code: { pf: 'pf', fundamentals: 'pf', basics: 'pf', oop: 'oop', ds: 'ds', dsa: 'ds', data: 'ds',
+        coal: 'coal', asm: 'coal', assembly: 'coal', registers: 'coal', register: 'coal' },
+    dsmath: {
+        logic: 'logic', propositional: 'logic', propositions: 'logic', predicate: 'logic',
+        quantifier: 'logic', quantifiers: 'logic', proofs: 'logic',
+        sets: 'sets', set: 'sets', venn: 'sets', power: 'sets',
+        relfun: 'relfun', relation: 'relfun', relations: 'relfun', function: 'relfun',
+        functions: 'relfun', mapping: 'relfun', maps: 'relfun', injection: 'relfun',
+        counting: 'counting', count: 'counting', combinatorics: 'counting', permutations: 'counting',
+        combination: 'counting', combinations: 'counting', pigeonhole: 'counting', factorial: 'counting',
+        numtheory: 'numtheory', numbertheory: 'numtheory', modular: 'numtheory', modulo: 'numtheory',
+        prime: 'numtheory', primes: 'numtheory', gcd: 'numtheory', divisibility: 'numtheory',
+        sequences: 'sequences', sequence: 'sequences', series: 'sequences', recurrence: 'sequences',
+        recurrences: 'sequences', induction: 'sequences', fibonacci: 'sequences', progression: 'sequences',
+        graphs: 'graphs', graph: 'graphs', graphtheory: 'graphs', tree: 'graphs', trees: 'graphs',
+        planar: 'graphs', colouring: 'graphs', coloring: 'graphs',
+        boolalg: 'boolalg', boolean: 'boolalg', bool: 'boolalg', gate: 'boolalg', gates: 'boolalg',
+        kmap: 'boolalg', karnaugh: 'boolalg',
+        prob: 'prob', probability: 'prob', chance: 'prob', chances: 'prob'
+    }
+};
+
 export function parseTopic(args, kind) {
     const words = (args || []).map((w) => String(w).toLowerCase());
-    const map = kind === 'math'
-        ? { linear: 'linear', la: 'linear', matrix: 'linear', matrices: 'linear', vector: 'linear', vectors: 'linear',
-            calc: 'calculus', calculus: 'calculus', mvc: 'mvc', multivariable: 'mvc', multi: 'mvc',
-            arith: 'arithmetic', arithmetic: 'arithmetic', sums: 'arithmetic' }
-        : { pf: 'pf', fundamentals: 'pf', basics: 'pf', oop: 'oop', ds: 'ds', dsa: 'ds', data: 'ds',
-            coal: 'coal', asm: 'coal', assembly: 'coal', registers: 'coal', register: 'coal' };
+    const map = TOPIC_WORDS[kind] || TOPIC_WORDS.math;
     for (const w of words) if (map[w]) return map[w];
     return null;
 }
