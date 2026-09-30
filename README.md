@@ -7,7 +7,7 @@ A WhatsApp bot that does three jobs, built to run on a **1 GiB RAM** VM:
 2. **Silent media guard** — a member you flag has their stickers and photos removed
    the instant they post them, including view-once photos, in any group where the bot is
    admin. **The bot never warns or sends replacement media.** The flagged media just disappears.
-3. **Group games** — nine games (including maths and programming quizzes) the whole group plays together
+3. **Group games** — ten games (including maths, programming and discrete-maths quizzes) the whole group plays together
    (`!game`), with a per-group scoreboard every member contributes to (`!top`).
 
 ---
@@ -66,6 +66,31 @@ The new questions are in `src/ds-questions.js`, included by `src/banks.js`.
 Entries may carry an optional `code` field; `src/presentation.js` renders it in
 WhatsApp monospace without language tags. Question prose stays outside the block.
 Scoring, permissions and the silent media guard are unchanged.
+
+### New subject: discrete mathematics (`!game dsmath`)
+
+Discrete maths is a game of its own, not a footnote in the maths one: **54
+verified cards (27 easy, 27 hard), six for every topic** — logic · sets ·
+relations & functions · counting · number theory · sequences & recurrences ·
+graph theory · Boolean algebra · probability. The same three difficulty modes
+the other study games use apply to it, and `all` is a mode of its own:
+
+| You send | What you get |
+|---|---|
+| `!game dsmath` | a card from any topic, at this chat's mode |
+| `!game dsmath hard logic` | a hard logic card · 10 pts |
+| `!game dsmath all counting` | counting, easy **or** hard — the card drawn decides the payout |
+| `!game mode all` | mixed levels become this chat's default for maths, code and discrete maths |
+| `!game math discrete` | the same subject, reached from the maths game |
+
+`!game discrete`, `!game dmath` and `!game dm` all start the same game. Cards
+that need working (a truth table, a recurrence, the data of a word problem)
+carry it in a small monospace block, exactly like the data-structure cards. The
+questions live in `src/dsmath-questions.js`; `test/dsmath.test.js` recomputes
+every numeric answer from scratch (gcd, binomial coefficients, Fibonacci,
+Euler's formula, enumerated sample spaces), so a wrong answer cannot ship
+silently. `!game add new dsmath` asks the AI for more, and `!game add new logic`
+asks for a single topic.
 
 See [message examples](docs/MESSAGE-EXAMPLES.md) for actual rendered replies, and
 [the approved design catalog](docs/MESSAGE-STYLE-PREVIEW.md) for the original options.
@@ -126,7 +151,7 @@ its own is an explicit stickers-only policy and leaves it alone.
 
 ## Games the whole group plays
 
-Nine games, one round per chat at a time — and a
+Ten games, one round per chat at a time — and a
 scoreboard every member contributes to:
 
 | Game | Start it with | How you win | Points |
@@ -136,8 +161,9 @@ scoreboard every member contributes to:
 | 🎭 `emoji` | `!game emoji` | decode the film, phrase or thing the emojis stand for (🦁👑 = The Lion King) — built-in, owner and rotating AI puzzles | 8 |
 | ⚡ `react` | `!game react` | the bot posts one emoji only; react to that message with the same emoji to win | 8 |
 | ✊ `rps` | `!game rps` | the bot has secretly thrown; call the hand that beats it — rock, paper or scissors. Two misses from one player reveal the hand | 8 |
-| ➗ `math` | `!game math [easy\|hard] [linear\|calc\|mvc\|arith]` | arithmetic plus linear algebra (matrices, determinants, vector spaces, eigenvalues), calculus and multivariable calculus | 5 easy / 10 hard |
-| 💻 `code` | `!game code [easy\|hard] [pf\|oop\|ds\|coal]` | programming fundamentals, OOP, data structures, COAL (8086 assembly, registers, flags) | 5 easy / 10 hard |
+| ➗ `math` | `!game math [easy\|hard\|all] [linear\|calc\|mvc\|arith]` | arithmetic plus linear algebra (matrices, determinants, vector spaces, eigenvalues), calculus and multivariable calculus | 5 easy / 10 hard |
+| 💻 `code` | `!game code [easy\|hard\|all] [pf\|oop\|ds\|coal]` | programming fundamentals, OOP, data structures, COAL (8086 assembly, registers, flags) | 5 easy / 10 hard |
+| 🧮 `dsmath` | `!game dsmath [easy\|hard\|all] [logic\|sets\|relfun\|counting\|numtheory\|sequences\|graphs\|boolalg\|prob]` | discrete maths: logic, sets, relations & functions, counting, number theory, sequences, graphs, Boolean algebra, probability | 5 easy / 10 hard |
 | 🔤 `scramble` | `!game scramble` | first correct answer to a shuffled word (some have clues) | 5 |
 | 🧠 `trivia` | `!game trivia` | first correct answer — built-in, member and rotating AI questions | 5 |
 
@@ -210,22 +236,25 @@ commands. A round starter may still use `!game stop` to end **their own** round,
 not the global game switch. Scores/owner settings survive restarts in
 `DATA_DIR/scores.json`; `!top` and `!game me` remain readable while games are off.
 
-**Easy / hard mode:** `!game mode hard` (or `easy`) sets the default level for
-math and code in that chat, and is saved. One round can override it:
-`!game math easy`, `!game code hard coal`.
+**Easy / hard / mixed mode:** `!game mode hard` (or `easy`, or `all`) sets the
+default level for the three study games — math, code and dsmath — in that chat,
+and is saved. `all` mixes the levels, and every card pays its own points, so an
+easy draw never pays like a hard one. One round can override it:
+`!game math easy`, `!game code hard coal`, `!game dsmath all`.
 
-**Fresh AI questions, in small batches:** six pools are generated through your
+**Fresh AI questions, in small batches:** seven pools are generated through your
 AI keys, one small request per category, 20 s apart, each batch starting on the
 next provider (groq → gemini → groq …) so no API gets a burst:
 
 | Pool | Every | What gets replaced |
 |---|---|---|
 | trivia, riddle, emoji, scramble | `GAME_AI_TRIVIA_HOURS` (5h) | the **whole** pool — but only if someone played one of its items; unplayed pools cost no quota |
-| math, code | `GAME_AI_STUDY_HOURS` (10h) | **only the questions that were played**; unplayed ones stay |
+| math, code, dsmath | `GAME_AI_STUDY_HOURS` (10h) | **only the questions that were played**; unplayed ones stay |
 
 Failures keep the current pool and back off per category. Built-in questions
-(82 trivia, 63 riddles, 48 emoji puzzles, 116 words, 66 maths concept,
-75 programming) and contributed questions are never removed by the rotation —
+(82 trivia, 63 riddles, 48 emoji puzzles, 116 words, 66 maths concepts,
+105 programming and 54 discrete-maths cards) and contributed questions are
+never removed by the rotation —
 but the owner can delete any trivia question at any time with `!game delete`. Groq generation uses `GROQ_TEXT_MODEL` (default
 `openai/gpt-oss-120b`) because Groq retired the old llama-4-scout model.
 
@@ -248,11 +277,12 @@ GAME_TIMEOUT=180         # seconds a round stays open before the reveal
 GAME_COOLDOWN=5          # seconds between rounds (anything > 5 is capped to 5)
 GAME_MAX_ATTEMPTS=12
 GAME_AI_TRIVIA_HOURS=5   # trivia/scramble: renew whole pool if played
-GAME_AI_STUDY_HOURS=10   # math/code: replace played questions
+GAME_AI_STUDY_HOURS=10   # math/code/dsmath: replace played questions
 GAME_AI_TRIVIA_COUNT=16  # batch sizes (1–32 each)
 GAME_AI_PUZZLE_COUNT=16
 GAME_AI_MATH_COUNT=16
 GAME_AI_CODE_COUNT=16
+GAME_AI_DSMATH_COUNT=16  # the !game dsmath pool
 ```
 
 ---
@@ -264,8 +294,8 @@ GAME_AI_CODE_COUNT=16
 |---|---|---|
 | `!quiz` | anyone | solve the attached / replied image right now |
 | `!game` | anyone | every game, plus the score and random commands |
-| `!game <name> [args]` | anyone | start a round: number, riddle, emoji, rps, math, code, scramble, trivia |
-| `!game mode easy\|hard` | anyone | default math/code level for this chat |
+| `!game <name> [args]` | anyone | start a round: number, riddle, emoji, rps, math, code, dsmath, scramble, trivia, react |
+| `!game mode easy\|hard\|all` | anyone | default level for the maths games (math · code · dsmath) in this chat |
 | `!guess <answer>` (`!g`) | anyone | take a shot in the running round |
 | `!top` (`!top all`) | anyone | leaderboard of this chat (or of every chat) |
 | `!game me` / `!game status` | anyone | your score card / current game status |
@@ -494,10 +524,12 @@ src/
   quiz.js                 trigger → download → AI → format → send
   format.js               JSON parsing + the per-question layout + chunking
   commands.js             !flag / !unflag / !flags / !guard / !quiz / !stats / !game / !guess / !top
-  games.js                the nine games + rounds, hints, scoring, global controls
+  games.js                the ten games + rounds, hints, scoring, global controls
   scores.js               per-group boards + contributed questions + owner switch, data/scores.json
-  game-content.js         batched AI pools (trivia/scramble/math/code)
-  banks.js                built-in maths + programming question banks, data/game-content.json
+  game-content.js         batched AI pools (trivia/scramble/math/code/dsmath)
+  banks.js                built-in maths + programming + discrete-maths banks
+  ds-questions.js         the 30 verified data-structure cards (!game code ds)
+  dsmath-questions.js     the 54 verified discrete-maths cards (!game dsmath)
   random.js               !random / !roll / !flip / !pick / !shuffle / !8ball
   limiter.js              rate limiter + one-solve-per-chat gate
   message.js              pure WAMessage readers (kind, text, quoted, …)
@@ -505,13 +537,13 @@ src/
 scripts/
   setup-vm.sh             one-shot VM bootstrap (Node, swap, PM2, deps)
   check-env.js            npm run check — validates keys and model names
-test/                     263 unit + integration tests (node --test, no deps)
+test/                     367 unit + integration tests (node --test, no deps)
 docs/
   SETUP-FROM-YOUR-LAPTOP.md
 ```
 
 ```bash
-npm test          # 263 tests
+npm test          # 367 tests
 npm run check     # validate your .env against the live APIs
 npm start         # run
 ```

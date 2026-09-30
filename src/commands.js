@@ -83,6 +83,7 @@ export const HELP_TEXT = [
     '!game — browse games',
     '!game code easy ds — data structures',
     '!game math hard linear — linear algebra',
+    '!game dsmath hard counting — discrete maths',
     '!top — this chat’s leaderboard',
     '!game me — your score', '',
     '*Quick picks*',

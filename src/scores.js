@@ -14,6 +14,7 @@
  *   triviaOverrides{}         normalised key → {a:[...]} answers the owner set
  *                             with !game modify on a built-in question
  *   settings.gamesEnabled     owner switch; survives a restart independently of GAMES
+ *   settings.modes[jid]       this chat's default maths level: easy | hard | all
  *
  * Generated daily content lives separately in game-content.json, so resetting
  * leaderboards can never delete contributed questions or the current AI pool.
@@ -29,6 +30,8 @@ const MAX_QUESTIONS = 500;
 const QUESTION_MAX_LEN = 200;
 const ANSWER_MAX_LEN = 60;
 const EMOJI_MAX_LEN = 48;
+/** Difficulty a chat can pin for its maths games (math, code, dsmath). */
+const GAME_MODES = ['easy', 'hard', 'all'];
 
 /**
  * The key a person's score is stored under.
@@ -157,10 +160,11 @@ export function createScoreStore({ file, log, maxQuestions = MAX_QUESTIONS } = {
         return { found, points, name, saved: found ? flush() : true };
     }
 
-    /** Per-chat difficulty for math/code: 'easy' | 'hard'. */
-    const modeOf = (jid) => data.settings.modes?.[String(jid)] === 'hard' ? 'hard' : 'easy';
+    /** Per-chat difficulty for the maths games: 'easy' | 'hard' | 'all' (mixed). */
+    const cleanMode = (mode) => (GAME_MODES.includes(mode) ? mode : 'easy');
+    const modeOf = (jid) => cleanMode(data.settings.modes?.[String(jid)]);
     function setMode(jid, mode) {
-        data.settings.modes = { ...(data.settings.modes || {}), [String(jid)]: mode === 'hard' ? 'hard' : 'easy' };
+        data.settings.modes = { ...(data.settings.modes || {}), [String(jid)]: cleanMode(mode) };
         return flush();
     }
 

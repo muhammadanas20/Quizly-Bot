@@ -66,6 +66,8 @@ test('loadConfig: the game settings have sane defaults and accept overrides', ()
     assert.equal(loadConfig({ GAME_COOLDOWN: '0' }).gameCooldownMs, 0);
     assert.equal(loadConfig({ GAME_AI_TRIVIA_COUNT: '100', GAME_AI_PUZZLE_COUNT: '0' }).gameAiTriviaCount, 32);
     assert.equal(loadConfig({ GAME_AI_PUZZLE_COUNT: '0' }).gameAiPuzzleCount, 16);
+    assert.equal(loadConfig({ GAME_AI_DSMATH_COUNT: '100' }).gameAiDsmathCount, 32);
+    assert.equal(loadConfig({ GAME_AI_DSMATH_COUNT: '0' }).gameAiDsmathCount, 16);
 
     // nonsense falls back instead of producing a 0-second round or a 0-guess cap
     const junk = loadConfig({ GAME_TIMEOUT: 'soon', GAME_MAX_ATTEMPTS: '-3' });

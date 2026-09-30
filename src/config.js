@@ -190,9 +190,10 @@ export function loadConfig(env = process.env) {
         gameAiPuzzleCount: Math.max(1, Math.min(int(env.GAME_AI_PUZZLE_COUNT, 16) || 16, 32)),
         gameAiMathCount  : Math.max(1, Math.min(int(env.GAME_AI_MATH_COUNT, 16) || 16, 32)),
         gameAiCodeCount  : Math.max(1, Math.min(int(env.GAME_AI_CODE_COUNT, 16) || 16, 32)),
+        gameAiDsmathCount: Math.max(1, Math.min(int(env.GAME_AI_DSMATH_COUNT, 16) || 16, 32)),
         // trivia + scramble: replace everything if played, every N hours
         gameAiTriviaHours: Math.max(1, Math.min(int(env.GAME_AI_TRIVIA_HOURS, 5) || 5, 48)),
-        // math + code: replace only used questions, every N hours
+        // math + code + dsmath: replace only used questions, every N hours
         gameAiStudyHours : Math.max(1, Math.min(int(env.GAME_AI_STUDY_HOURS, 10) || 10, 72)),
 
         // Limits

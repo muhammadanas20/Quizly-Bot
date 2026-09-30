@@ -16,6 +16,7 @@ Send a screenshot with “quiz”, or reply to one with !quiz.
 !game — browse games
 !game code easy ds — data structures
 !game math hard linear — linear algebra
+!game dsmath hard counting — discrete maths
 !top — this chat’s leaderboard
 !game me — your score
 
@@ -47,15 +48,18 @@ The media guard stays silent, including for view-once media.
 ✊ *rps* — The bot has already thrown. Beat its hand for 8 pts — two misses and it shows its hand.
 ➗ *math* — Arithmetic plus linear algebra, calculus and multivariable calculus. 5 easy / 10 hard.
 💻 *code* — PF, OOP, data structures and COAL assembly/registers. 5 easy / 10 hard.
+🧮 *dsmath* — Logic, sets, relations, counting, number theory, sequences, graphs, Boolean algebra. 5 easy / 10 hard.
 🔤 *scramble* — Letters shuffled at random; first correct word takes 5 pts.
 🧠 *trivia* — General knowledge, plus the questions the owner contributed. 5 pts.
+⚡ *react* — Bot posts one random emoji — react to that message with the same emoji to win! 8 pts.
 
 Start with !game <name>
-Math/code: add easy or hard.
+Maths games: add easy, hard or all (mixed).
 Code topics: pf · oop · ds · coal
 Math topics: linear · calc · mvc · arith
+Discrete topics: logic · sets · relfun · counting · numtheory · sequences · graphs · boolalg · prob
 
-Example: !game code easy ds
+Example: !game code easy ds · !game dsmath hard counting
 !top for scores · !game help for rules and controls
 ````
 
@@ -78,21 +82,26 @@ Wins earn game points; streaks can add a bonus.
 ✊ *rps* · 8 pts
 !game rps → call rock, paper or scissors
 ➗ *math* · 5 pts
-!game math [easy|hard] [linear|calc|mvc|arith] → send the answer
+!game math [easy|hard|all] [linear|calc|mvc|arith] → send the answer
 💻 *code* · 5 pts
-!game code [easy|hard] [pf|oop|ds|coal] → send the answer
+!game code [easy|hard|all] [pf|oop|ds|coal] → send the answer
+🧮 *dsmath* · 5 pts
+!game dsmath [easy|hard|all] [topic] → send the answer
 🔤 *scramble* · 5 pts
 !game scramble → send the word
 🧠 *trivia* · 5 pts
 !game trivia → send the answer
+⚡ *react* · 8 pts
+!game react → react to the bot’s emoji with the same emoji
 
-Math/code hard mode pays 10 pts. Number rewards fall with wrong guesses.
+Hard maths cards pay 10 pts, easy ones 5. Number rewards fall with wrong guesses.
 Rounds end when time runs out. Wrong guesses may get hints.
 
 *Rounds*
 !game <name> — start a round
+!game dsmath [easy|hard|all] <topic> — discrete maths
 !guess <answer> — or just send your answer
-!game mode easy|hard — default math/code difficulty
+!game mode easy|hard|all — default difficulty for maths games
 !game end — end your round
 !game status — availability and question pools
 
@@ -111,8 +120,8 @@ Rounds end when time runs out. Wrong guesses may get hints.
 !game modify Question ; New answer
 !game delete Question
 !game restore
-!game add new ds
-Generation topics: pf · oop · ds · coal · trivia · math · scramble
+!game add new ds · !game add new dsmath
+Generation topics: pf · oop · ds · coal · dsmath · trivia · riddle · emoji · math · scramble
 ````
 
 ## number round
@@ -176,6 +185,38 @@ easy · 5 pts
 What is the derivative of x³?
 
 180s · Send your answer.
+!game end to end your round · !top for scores
+````
+
+## discrete maths round
+
+````text
+🧮 *Counting · Easy*
+5 pts · 180s
+
+What is 5! (five factorial)?
+
+Send your answer.
+!game end to end your round · !top for scores
+````
+
+## discrete maths with the working shown
+
+````text
+🧮 *Logic · Hard*
+10 pts · 180s
+
+When p is false, what is the truth value of the implication p → q, whatever q is?
+
+```
+p q | p → q
+T T |  T
+T F |  F
+F T |  T
+F F |  T
+```
+
+Send your answer.
 !game end to end your round · !top for scores
 ````
 

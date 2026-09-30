@@ -13,7 +13,8 @@ import { loadConfig } from '../src/config.js';
 const HOUR = 60 * 60 * 1000;
 const config = loadConfig({
     GROQ_API_KEY: 'g', GEMINI_API_KEY: 'm', AI_ORDER: 'groq,gemini',
-    GAME_AI_TRIVIA_COUNT: '2', GAME_AI_PUZZLE_COUNT: '2', GAME_AI_MATH_COUNT: '2', GAME_AI_CODE_COUNT: '2'
+    GAME_AI_TRIVIA_COUNT: '2', GAME_AI_PUZZLE_COUNT: '2', GAME_AI_MATH_COUNT: '2',
+    GAME_AI_CODE_COUNT: '2', GAME_AI_DSMATH_COUNT: '2'
 });
 
 const emojis = (prefix, n = 2) => Array.from({ length: n }, (_, i) => ({
@@ -110,7 +111,7 @@ test('first start fills every pool, one sequential request each, alternating pro
     const out = await store.refreshIfStale();
     assert.deepEqual(out.refreshed, CATEGORIES);
     assert.deepEqual(calls.map((c) => c.category), CATEGORIES);
-    assert.deepEqual(calls.map((c) => c.turn), [0, 1, 2, 3, 4, 5], 'each batch starts at the next provider');
+    assert.deepEqual(calls.map((c) => c.turn), [0, 1, 2, 3, 4, 5, 6], 'each batch starts at the next provider');
     for (const c of CATEGORIES) assert.equal(store.items(c).length, 2);
     assert.equal(createGameContentStore({ file, config }).load().items('math').length, 2, 'survives restart');
     store.close();
@@ -207,8 +208,8 @@ test('batches are spaced out by the gap timer', async (t) => {
         clearTimer: () => {}
     }).load();
     await store.refreshIfStale();
-    assert.equal(calls.length, 6);
-    assert.deepEqual(delays.filter((d) => d === 20_000).length, 5, 'a 20s gap between the six requests');
+    assert.equal(calls.length, 7);
+    assert.deepEqual(delays.filter((d) => d === 20_000).length, 6, 'a 20s gap between the seven requests');
     store.close();
 });
 
