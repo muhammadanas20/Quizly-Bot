@@ -28,17 +28,34 @@ const coin = ['H', 'T'];
 const tosses = coin.flatMap((a) => coin.map((b) => [a, b]));
 const dicePairs = die.flatMap((a) => die.map((b) => [a, b]));
 
-test('the subject ships 54 verified cards: three easy and three hard per topic', () => {
+test('the core subject still ships its 54 verified cards: three easy and three hard per topic', () => {
     assert.equal(DSMATH_QUESTIONS.length, 54);
-    assert.equal(DSMATH_BANK.length, 54, 'the bank is the whole subject');
     assert.equal(DSMATH_QUESTIONS.filter((q) => q.level === 'easy').length, 27);
     assert.equal(DSMATH_QUESTIONS.filter((q) => q.level === 'hard').length, 27);
     assert.deepEqual([...new Set(DSMATH_QUESTIONS.map((q) => q.topic))], [...DSMATH_TOPICS]);
     for (const topic of DSMATH_TOPICS) {
         for (const level of ['easy', 'hard']) {
-            assert.equal(DSMATH_BANK.filter((q) => q.topic === topic && q.level === level).length, 3, `${topic}/${level}`);
+            assert.equal(DSMATH_QUESTIONS.filter((q) => q.topic === topic && q.level === level).length, 3, `${topic}/${level}`);
         }
     }
+});
+
+test('the extended bank keeps every topic playable at both levels, with real bulk', () => {
+    // The extras join the core cards in DSMATH_BANK; the games draw from the
+    // bank, so this is the list that must stay complete.
+    assert.ok(DSMATH_BANK.length >= DSMATH_QUESTIONS.length, 'the bank is at least the core subject');
+    for (const topic of DSMATH_TOPICS) {
+        const cards = DSMATH_BANK.filter((q) => q.topic === topic);
+        assert.ok(cards.length >= 20, `${topic}: only ${cards.length} cards`);
+        for (const level of ['easy', 'hard']) {
+            const at = cards.filter((q) => q.level === level);
+            assert.ok(at.length >= 8, `${topic}/${level}: only ${at.length} cards`);
+        }
+    }
+    // and the difficulty mix never collapses into a single level
+    const easy = DSMATH_BANK.filter((q) => q.level === 'easy').length;
+    const hard = DSMATH_BANK.filter((q) => q.level === 'hard').length;
+    assert.ok(easy >= 100 && hard >= 100, `${easy} easy / ${hard} hard`);
 });
 
 test('every card is chat-shaped, unique and never leaks its answer', () => {
@@ -62,7 +79,10 @@ test('every card is chat-shaped, unique and never leaks its answer', () => {
 test('every numeric answer matches the independently computed result', () => {
     const checked = new Set();
     const accepts = (fragment, value) => {
-        const matches = DSMATH_BANK.filter((q) => q.q.includes(fragment));
+        // Only the curated core cards are named here; the extended bank asks
+        // the same ideas with different numbers, so it is recomputed in
+        // test/banks.test.js instead.
+        const matches = DSMATH_QUESTIONS.filter((q) => q.q.includes(fragment));
         assert.equal(matches.length, 1, `“${fragment}” must name exactly one card`);
         const [card] = matches;
         assert.ok(looseMatches(String(value), card.a), `${fragment}: ${value} is not accepted by [${card.a}]`);
@@ -140,10 +160,13 @@ test('every numeric answer matches the independently computed result', () => {
     accepts('probability it is a king', 4 / 52);
     accepts('mutually exclusive events. What is P(A or B)', 0.3 + 0.4);
 
-    // Coverage: no card whose answer is a number may ride along unchecked.
-    const numbers = DSMATH_BANK.filter((q) => q.a.some((a) => /^-?\d+(\.\d+)?(\/\d+)?$/.test(a)));
+    // Coverage: every numeric card of the ORIGINAL curated subject is
+    // recomputed above. The extended bank derives its numbers from the same
+    // helpers it prints in the question (see src/dsmath-extra.js) and gets its
+    // own structural + arithmetic checks in test/banks.test.js.
+    const numbers = DSMATH_QUESTIONS.filter((q) => q.a.some((a) => /^-?\d+(\.\d+)?(\/\d+)?$/.test(a)));
     const missed = numbers.filter((q) => !checked.has(q)).map((q) => q.q);
-    assert.deepEqual(missed, [], 'every numeric card was recomputed above');
+    assert.deepEqual(missed, [], 'every numeric core card was recomputed above');
 });
 
 test('every dsmath card fits one WhatsApp message, fences balanced', () => {

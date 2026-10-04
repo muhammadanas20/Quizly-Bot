@@ -13,7 +13,7 @@ export const DS_QUESTIONS = Object.freeze([
     easy('Which linked-list type links its last node back to its first node?', ['circular linked list', 'circular', 'circular list']),
     hard('What is the worst-case time to insert at index 0 in a contiguous array of n items with spare capacity?', ['O(n)', 'n', 'linear']),
     hard('Given a pointer to a non-tail node in a singly linked list, what is the time to delete it by copying its successor’s data and bypassing that successor?', ['O(1)', 'constant', 'constant time']),
-    hard('Which cycle-detection algorithm uses a slow pointer and a fast pointer in a linked list?', ['floyd', 'floyds algorithm', 'floyd cycle detection', 'tortoise and hare', 'floyd’s algorithm', "floyd's algorithm"]),
+    hard('Which cycle-detection algorithm uses a slow pointer and a fast pointer in a linked list?', ['floyd', 'floyds algorithm', 'floyd cycle detection', 'tortoise and hare']),
 
     // Stacks and queues (3 easy / 3 hard)
     easy('Starting with an empty stack, what does the final pop return?', ['30'], 'push(10)\npush(20)\npop()\npush(30)\npop()'),
@@ -42,7 +42,7 @@ export const DS_QUESTIONS = Object.freeze([
     // Graphs and traversal (3 easy / 3 hard)
     easy('In a simple undirected graph, the number of edges incident to a vertex is called its what?', ['degree', 'vertex degree']),
     easy('What is a graph whose edges have a direction called?', ['directed graph', 'directed', 'digraph']),
-    easy('In an adjacency list, what does a vertex’s list contain?', ['neighbors', 'neighbours', 'adjacent vertices', 'neighboring vertices', 'neighbouring vertices']),
+    easy('In an adjacency list, what does a vertex’s list contain?', ['neighbors', 'neighbours', 'adjacent vertices', 'neighbouring vertices']),
     hard('What is BFS time complexity using adjacency lists, visiting all V vertices and E edges?', ['O(V + E)', 'O(V+E)', 'V + E', 'V+E']),
     hard('Run BFS from A on this undirected graph, visiting neighbors alphabetically and marking them on enqueue. Give the visit order.', ['A B C D', 'A, B, C, D', 'A,B,C,D', 'ABCD'], 'A: B, C\nB: A, D\nC: A, D\nD: B, C'),
     hard('A topological ordering exists exactly when a directed graph contains no directed what?', ['cycle', 'cycles', 'directed cycle', 'directed cycles'])

@@ -5,18 +5,32 @@ import { CODE_BANK } from '../src/banks.js';
 import { looseMatches } from '../src/games.js';
 import { questionText, roundCard, GAME_GUIDE } from '../src/presentation.js';
 
-test('DS expansion adds exactly 30 unique questions, 15 at each difficulty', () => {
+test('the original DS expansion keeps exactly 30 unique questions, 15 at each difficulty', () => {
     assert.equal(DS_QUESTIONS.length, 30);
     assert.equal(DS_QUESTIONS.filter((q) => q.level === 'easy').length, 15);
     assert.equal(DS_QUESTIONS.filter((q) => q.level === 'hard').length, 15);
     const ds = CODE_BANK.filter((q) => q.topic === 'ds');
-    assert.equal(ds.length, 48);
-    assert.equal(new Set(ds.map((q) => q.q.toLowerCase())).size, ds.length);
+    assert.ok(ds.length >= 48, `the DS pool should have grown, not shrunk (${ds.length})`);
+    assert.equal(new Set(ds.map((q) => q.q.toLowerCase())).size, ds.length, 'no question is asked twice');
     for (const q of DS_QUESTIONS) {
         assert.ok(ds.includes(q));
         assert.ok(q.a.length && q.a.every((a) => typeof a === 'string' && a.trim()));
         for (const a of q.a) assert.ok(looseMatches(a, q.a), `${q.q}: ${a}`);
         assert.ok(!looseMatches('deliberately incorrect answer', q.a));
+    }
+});
+
+test('every extended DS card is well-shaped and answers itself', () => {
+    const ds = CODE_BANK.filter((q) => q.topic === 'ds');
+    for (const q of ds) {
+        assert.ok(q.q.length >= 10 && q.q.length <= 300, q.q);
+        assert.ok(['easy', 'hard'].includes(q.level), q.q);
+        assert.ok(Array.isArray(q.a) && q.a.length >= 1 && q.a.length <= 4, `${q.q}: 1-4 accepted spellings`);
+        for (const a of q.a) {
+            assert.ok(a === a.trim() && a.length && a.length <= 60, `${q.q}: ${a}`);
+            assert.ok(looseMatches(a, q.a), `${q.q}: ${a} does not match itself`);
+        }
+        assert.ok(!looseMatches('deliberately incorrect answer', q.a), q.q);
     }
 });
 
