@@ -37,7 +37,7 @@
 import { questionText, roundCard, GAME_GUIDE } from './presentation.js';
 
 import { randomInt, pickOne, shuffle, parseRange } from './random.js';
-import { MATH_BANK, CODE_BANK, DSMATH_BANK, DSMATH_TOPICS, parseTopic } from './banks.js';
+import { DSMATH_TOPICS, parseTopic, conceptPool, textKey, BANK_SIZES } from './banks.js';
 import { normalizeId } from './config.js';
 import { questionKey } from './scores.js';
 
@@ -1046,20 +1046,70 @@ export function createGameEngine({
         return picked;
     }
 
-    const lastConcept = new Map();   // "jid|kind" → { at, value }
+    /**
+     * The cards a chat has recently been shown, per subject.
+     *
+     * The study banks hold hundreds of cards, so remembering only the last one
+     * would let the same handful of questions come round again and again. Each
+     * entry is a bounded ring of FNV-1a hashes: the whole memory for a busy
+     * chat is a few thousand integers, it expires with repeatMemoryMs like the
+     * other repeat maps, and `!game stop`/`reset` clears it.
+     */
+    const recentConcept = new Map();   // "jid|kind" → { at, order:[key], seen:Set<key> }
+
+    // "Huge random gap": how many distinct cards a chat will get through before
+    // any of them may come back. GAME_REPEAT_MEMORY tunes it (5–1000).
+    const repeatLimit = Math.max(5, Math.min(
+        Number.isFinite(config.gameRepeatMemory) ? Math.floor(config.gameRepeatMemory) : 120, 1000
+    ));
+
+    function rememberConcept(stamp, key) {
+        let memory = recentConcept.get(stamp);
+        if (!memory) {
+            memory = { at: now(), order: [], seen: new Set() };
+            recentConcept.set(stamp, memory);
+        }
+        memory.at = now();
+        if (key === null || key === undefined || memory.seen.has(key)) return;
+        memory.seen.add(key);
+        memory.order.push(key);
+        while (memory.order.length > repeatLimit) memory.seen.delete(memory.order.shift());
+    }
+
+    /**
+     * One card from the pool that this chat has NOT seen in its last few
+     * hundred draws. Only when every card has been used does the memory rewind
+     * — and even then the newest handful stay excluded, so two rounds in a row
+     * can never show the same question.
+     */
+    function pickFresh(pool, stamp, field) {
+        let memory = recentConcept.get(stamp);
+        let candidates = memory ? pool.filter((e) => !memory.seen.has(textKey(e[field]))) : pool;
+        if (!candidates.length && memory) {
+            const keep = memory.order.slice(-Math.min(8, memory.order.length));
+            memory.order = [...keep];
+            memory.seen = new Set(keep);
+            candidates = pool.filter((e) => !memory.seen.has(textKey(e[field])));
+        }
+        if (!candidates.length) candidates = pool;
+        const picked = pickOne(candidates, random);
+        if (picked) rememberConcept(stamp, textKey(picked[field]));
+        return picked;
+    }
 
     /** Built-in bank + AI pool for math/code/dsmath, filtered by level and topic. */
     function pickConcept(kind, level, topic, jid) {
-        const bank = kind === 'math' ? MATH_BANK : kind === 'code' ? CODE_BANK : DSMATH_BANK;
         const ai = content?.items?.(kind) || [];
         const fits = (e) => (level === 'all' || e.level === level) && (!topic || e.topic === topic);
-        let pool = [...bank.filter(fits), ...ai.filter(fits)];
-        if (!pool.length) pool = [...bank, ...ai].filter((e) => !topic || e.topic === topic);
+        // The built-in half is an index built once per shape; only the small
+        // rotating AI pool is filtered per round.
+        let builtin = conceptPool(kind, level, topic);
+        if (!builtin.length) builtin = conceptPool(kind, 'all', topic);
+        let pool = [...builtin, ...ai.filter(fits)];
+        if (!pool.length) pool = [...conceptPool(kind, 'all', topic), ...ai.filter((e) => !topic || e.topic === topic)];
         if (!pool.length) return null;
-        const stamp = `${jid}|${kind}`;
-        const picked = pickDifferent(pool, lastConcept.get(stamp)?.value, 'q');
-        lastConcept.set(stamp, { at: now(), value: picked.q });
-        if (ai.includes(picked)) content?.markUsed?.(kind, picked);
+        const picked = pickFresh(pool, `${jid}|${kind}`, 'q');
+        if (picked && ai.includes(picked)) content?.markUsed?.(kind, picked);
         return picked;
     }
 
@@ -1394,6 +1444,7 @@ export function createGameEngine({
         lastEmoji.clear();
         lastScramble.clear();
         lastReact.clear();
+        recentConcept.clear();
         if (send && cancelled.length) {
             // Sequential/async: do not hold up the owner's confirmation or
             // flood the WhatsApp socket if many groups had an open round.
@@ -1416,6 +1467,8 @@ export function createGameEngine({
         const hours = st ? `\n_trivia/scramble renew every ${st.trivia.everyHours}h if played · maths pools replace played questions every ${st.math.everyHours}h_` : '';
         return `🎮 *Game status*\n\nGames: *${enabled ? 'ON' : 'OFF'}*\nActive rounds: ${rounds.size} · ${cooldownMs / 1000}s between rounds\n`
             + `🎚️ Maths mode here (math · code · dsmath): *${scores?.modeOf?.(ctx?.jid) || 'easy'}*\n`
+            + `\n*Built-in bank*\nmath ${BANK_SIZES.math} · code ${BANK_SIZES.code} · dsmath ${BANK_SIZES.dsmath}`
+            + `\n_No repeats until ${repeatLimit} cards per subject have been played in this chat._\n`
             + `\n*Question pools*\nAI pool: ${line}${hours}`;
     }
 
@@ -2379,7 +2432,7 @@ export function createGameEngine({
         for (const [jid, e] of lastEmoji) if (now() - e.at >= repeatMemoryMs) lastEmoji.delete(jid);
         for (const [jid, e] of lastScramble) if (now() - e.at >= repeatMemoryMs) lastScramble.delete(jid);
         for (const [jid, e] of lastReact) if (now() - e.at >= repeatMemoryMs) lastReact.delete(jid);
-        for (const [stamp, e] of lastConcept) if (now() - e.at >= repeatMemoryMs) lastConcept.delete(stamp);
+        for (const [stamp, e] of recentConcept) if (now() - e.at >= repeatMemoryMs) recentConcept.delete(stamp);
         return out;
     }
 

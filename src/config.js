@@ -185,6 +185,10 @@ export function loadConfig(env = process.env) {
         // Participation points have a separate minimum five-second window.
         gameCooldownMs  : Math.min(int(env.GAME_COOLDOWN, 5), 5) * 1000,
         gameMaxAttempts : int(env.GAME_MAX_ATTEMPTS, 12) || 12,
+        // How many cards a chat will not see again. The built-in study banks
+        // hold hundreds of cards, so a big memory is what makes !game code and
+        // !game dsmath feel endless instead of shuffling the same few dozen.
+        gameRepeatMemory: Math.max(5, Math.min(int(env.GAME_REPEAT_MEMORY, 120) || 120, 1000)),
         // One bounded text-only AI request per day replaces the generated pool.
         gameAiTriviaCount: Math.max(1, Math.min(int(env.GAME_AI_TRIVIA_COUNT, 16) || 16, 32)),
         gameAiPuzzleCount: Math.max(1, Math.min(int(env.GAME_AI_PUZZLE_COUNT, 16) || 16, 32)),

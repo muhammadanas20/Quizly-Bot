@@ -5,10 +5,29 @@
  * Every entry: { q, a:[accepted answers], level:'easy'|'hard', topic }.
  * Answers are short and unambiguous so they can be typed in a chat.
  * These are permanent; the AI pools in game-content.js add to them.
+ *
+ * The bulk lives in per-subject modules so a subject can grow without making
+ * this file unreadable:
+ *
+ *   ds-questions.js      the original 30 verified DS cards
+ *   dsa-questions.js     the extended DS/A bank (arrays … graphs, DP)
+ *   coal-questions.js    the extended COAL/8086 bank
+ *   dsmath-questions.js  the original 54 verified discrete-maths cards
+ *   dsmath-extra.js      the extended discrete-maths bank
+ *
+ * LOAD COST
+ * The modules are plain data and the pools games actually draw from are
+ * indexed once, on first use ("analysis/arrays/…", "logic/sets/…"), so a
+ * round costs a lookup instead of filtering several hundred cards every time
+ * somebody types !game. `conceptPool()` never rebuilds an index it has
+ * already built, and every index holds references — not copies — of the cards.
  */
 
 import { DS_QUESTIONS } from './ds-questions.js';
+import { DSA_QUESTIONS } from './dsa-questions.js';
+import { COAL_QUESTIONS } from './coal-questions.js';
 import { DSMATH_QUESTIONS } from './dsmath-questions.js';
+import { DSMATH_EXTRA } from './dsmath-extra.js';
 
 const E = 'easy', H = 'hard';
 const q = (topic, level, question, ...a) => ({ q: question, a, level, topic });
@@ -153,6 +172,7 @@ export const CODE_BANK = Object.freeze([
     q('ds', H, 'Which self-balancing BST keeps balance factors in {−1, 0, 1}?', 'avl', 'avl tree'),
     q('ds', H, 'Two keys mapping to the same hash slot is called a?', 'collision'),
     ...DS_QUESTIONS,
+    ...DSA_QUESTIONS,
     // COAL — easy (8086 assembly and registers)
     q('coal', E, 'In 8086, which register is the accumulator?', 'ax', 'al', 'eax'),
     q('coal', E, 'In 8086, which register is used as the counter by LOOP?', 'cx', 'ecx'),
@@ -178,7 +198,8 @@ export const CODE_BANK = Object.freeze([
     q('coal', H, 'What does XOR AX, AX leave in AX?', '0', 'zero'),
     q('coal', H, 'Which register is the base pointer used for stack frames?', 'bp', 'ebp', 'base pointer'),
     q('coal', H, 'In MUL BL, the 16-bit product is stored in which register?', 'ax'),
-    q('coal', H, 'Which addressing mode is used in MOV AX, [BX]?', 'register indirect', 'indirect')
+    q('coal', H, 'Which addressing mode is used in MOV AX, [BX]?', 'register indirect', 'indirect'),
+    ...COAL_QUESTIONS
 ]);
 
 // ─── Discrete mathematics: logic, sets, relations, counting, graphs, … ──────
@@ -191,7 +212,51 @@ export const DSMATH_TOPICS = Object.freeze([
  * the 54 verified cards (27 easy, 27 hard, six for every topic) so the numbers
  * can be re-checked in one place.
  */
-export const DSMATH_BANK = Object.freeze([...DSMATH_QUESTIONS]);
+export const DSMATH_BANK = Object.freeze([...DSMATH_QUESTIONS, ...DSMATH_EXTRA]);
+
+// ─── lazy per-topic pools ────────────────────────────────────────────────────
+/**
+ * Built-in cards for one (kind, level, topic) shape, in bank order.
+ *
+ * A round asks for one shape only, so the filter that used to run over the
+ * whole bank on every `!game code hard ds` now runs once and is cached. The
+ * arrays are frozen and hold references to the shipped cards, so a chat that
+ * plays every topic for a week still costs one copy of a few hundred pointers.
+ */
+const poolCache = new Map();
+
+export function conceptPool(kind, level, topic) {
+    const key = `${kind}|${level}|${topic || '*'}`;
+    let pool = poolCache.get(key);
+    if (!pool) {
+        const bank = kind === 'math' ? MATH_BANK : kind === 'code' ? CODE_BANK : DSMATH_BANK;
+        pool = Object.freeze(bank.filter((e) => (level === 'all' || e.level === level) && (!topic || e.topic === topic)));
+        poolCache.set(key, pool);
+    }
+    return pool;
+}
+
+/** How many built-in cards each subject ships — shown by !game status. */
+export const BANK_SIZES = Object.freeze({
+    math: MATH_BANK.length,
+    code: CODE_BANK.length,
+    dsmath: DSMATH_BANK.length
+});
+
+/**
+ * FNV-1a over the question text. The per-chat "already seen" memory stores
+ * these 32-bit numbers instead of the cards themselves: a chat that has used
+ * 120 cards costs about a kilobyte, and the comparison is an integer Set hit.
+ */
+export function textKey(text) {
+    const s = String(text || '');
+    let h = 0x811c9dc5;
+    for (let i = 0; i < s.length; i++) {
+        h ^= s.charCodeAt(i);
+        h = Math.imul(h, 0x01000193);
+    }
+    return h >>> 0;
+}
 
 /** Parse a topic keyword typed after !game math / !game code / !game dsmath. */
 const TOPIC_WORDS = {

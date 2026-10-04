@@ -53,9 +53,19 @@ live in `!game help`, not a large monospace command table. Quiz replies keep the
 question → reason → answer order and answer key, while provider/model/timing details
 stay in server logs. Missing answers and incomplete screenshots stay visibly flagged.
 
-The code game now includes **48 built-in data-structure questions**: the original 18
-plus **30 new exercises (15 easy, 15 hard)** covering arrays, linked lists, stacks,
-queues, trees, BSTs, heaps, hashing and graphs. Operation traces use short pseudocode
+The code game ships **782 built-in questions**, and the two big subjects behind it
+grew into full banks:
+
+| `!game code` topic | Built-in cards | What they cover |
+|---|---|---|
+| `ds` | **386** | arrays, linked lists, stacks, queues, recursion, sorting, searching, trees, BSTs, heaps, hashing, graphs, strings, greedy/DP |
+| `coal` | **363** | 8086 registers and flags, segmentation, addressing modes, data transfer, arithmetic, logic, shifts, string instructions, control flow, stack frames, interrupts, assembler directives, encoding |
+| `pf` · `oop` | 18 · 15 | the original programming fundamentals and OOP cards |
+
+Every "what is in the register afterwards" COAL card is *executed* on a small
+8/16-bit core while the bot loads, and every "how many / how long" DS card
+computes its own answer from the numbers printed in the question, so an answer
+cannot drift away from its question. Operation traces still use short pseudocode
 blocks separated from the question text.
 
 - `!game code easy ds` — an easy DS round
@@ -69,11 +79,12 @@ Scoring, permissions and the silent media guard are unchanged.
 
 ### New subject: discrete mathematics (`!game dsmath`)
 
-Discrete maths is a game of its own, not a footnote in the maths one: **54
-verified cards (27 easy, 27 hard), six for every topic** — logic · sets ·
-relations & functions · counting · number theory · sequences & recurrences ·
-graph theory · Boolean algebra · probability. The same three difficulty modes
-the other study games use apply to it, and `all` is a mode of its own:
+Discrete maths is a game of its own, not a footnote in the maths one: **445
+cards** — the original 54 verified ones (27 easy, 27 hard) plus **391 more**
+across the nine topics — logic · sets · relations & functions · counting ·
+number theory · sequences & recurrences · graph theory · Boolean algebra ·
+probability. The same three difficulty modes the other study games use apply to
+it, and `all` is a mode of its own:
 
 | You send | What you get |
 |---|---|
@@ -86,10 +97,11 @@ the other study games use apply to it, and `all` is a mode of its own:
 `!game discrete`, `!game dmath` and `!game dm` all start the same game. Cards
 that need working (a truth table, a recurrence, the data of a word problem)
 carry it in a small monospace block, exactly like the data-structure cards. The
-questions live in `src/dsmath-questions.js`; `test/dsmath.test.js` recomputes
-every numeric answer from scratch (gcd, binomial coefficients, Fibonacci,
-Euler's formula, enumerated sample spaces), so a wrong answer cannot ship
-silently. `!game add new dsmath` asks the AI for more, and `!game add new logic`
+the curated 54 live in `src/dsmath-questions.js` and the bulk in
+`src/dsmath-extra.js`. `test/dsmath.test.js` recomputes every numeric answer of
+the curated subject from scratch (gcd, binomial coefficients, Fibonacci,
+Euler's formula, enumerated sample spaces) and `test/banks.test.js` does the
+same for the extended banks, so a wrong answer cannot ship silently. `!game add new dsmath` asks the AI for more, and `!game add new logic`
 asks for a single topic.
 
 See [message examples](docs/MESSAGE-EXAMPLES.md) for actual rendered replies, and
@@ -251,9 +263,19 @@ next provider (groq → gemini → groq …) so no API gets a burst:
 | trivia, riddle, emoji, scramble | `GAME_AI_TRIVIA_HOURS` (5h) | the **whole** pool — but only if someone played one of its items; unplayed pools cost no quota |
 | math, code, dsmath | `GAME_AI_STUDY_HOURS` (10h) | **only the questions that were played**; unplayed ones stay |
 
+**A big bank that never repeats itself:** a chat remembers the last
+`GAME_REPEAT_MEMORY` (120 by default) cards *per subject* and draws the next
+round from everything else, so a group can play for hours without meeting the
+same question twice. The memory is a tiny ring of 32-bit hashes of the question
+text — a few hundred numbers per chat, expired after a day of silence, cleared
+by `!game stop`/`!game reset` — and the per-topic pools are indexed once on
+first use instead of being re-filtered every round. Adding several hundred
+cards therefore costs about 10 ms at startup (5 ms → 16 ms for the whole bank
+set) and a fraction of a millisecond per round, not a slower bot.
+
 Failures keep the current pool and back off per category. Built-in questions
 (82 trivia, 63 riddles, 48 emoji puzzles, 116 words, 66 maths concepts,
-105 programming and 54 discrete-maths cards) and contributed questions are
+**782 programming and 445 discrete-maths cards**) and contributed questions are
 never removed by the rotation —
 but the owner can delete any trivia question at any time with `!game delete`. Groq generation uses `GROQ_TEXT_MODEL` (default
 `openai/gpt-oss-120b`) because Groq retired the old llama-4-scout model.
@@ -276,6 +298,7 @@ GAMES=on                 # initial state; owner switch persists after first chan
 GAME_TIMEOUT=180         # seconds a round stays open before the reveal
 GAME_COOLDOWN=5          # seconds between rounds (anything > 5 is capped to 5)
 GAME_MAX_ATTEMPTS=12
+GAME_REPEAT_MEMORY=120   # cards a chat will not be shown again (5–1000)
 GAME_AI_TRIVIA_HOURS=5   # trivia/scramble: renew whole pool if played
 GAME_AI_STUDY_HOURS=10   # math/code/dsmath: replace played questions
 GAME_AI_TRIVIA_COUNT=16  # batch sizes (1–32 each)
@@ -527,9 +550,13 @@ src/
   games.js                the ten games + rounds, hints, scoring, global controls
   scores.js               per-group boards + contributed questions + owner switch, data/scores.json
   game-content.js         batched AI pools (trivia/scramble/math/code/dsmath)
-  banks.js                built-in maths + programming + discrete-maths banks
+  banks.js                built-in banks, the lazy per-topic pool index + bank sizes
+  bank-tools.js           pure helpers the bulk cards compute their answers with
   ds-questions.js         the 30 verified data-structure cards (!game code ds)
+  dsa-questions.js        the extended DS/A bank — arrays … graphs, greedy, DP
+  coal-questions.js       the extended COAL/8086 bank (traces are executed)
   dsmath-questions.js     the 54 verified discrete-maths cards (!game dsmath)
+  dsmath-extra.js         the extended discrete-maths bank
   random.js               !random / !roll / !flip / !pick / !shuffle / !8ball
   limiter.js              rate limiter + one-solve-per-chat gate
   message.js              pure WAMessage readers (kind, text, quoted, …)
@@ -537,13 +564,13 @@ src/
 scripts/
   setup-vm.sh             one-shot VM bootstrap (Node, swap, PM2, deps)
   check-env.js            npm run check — validates keys and model names
-test/                     367 unit + integration tests (node --test, no deps)
+test/                     362 unit + integration tests (node --test, no deps)
 docs/
   SETUP-FROM-YOUR-LAPTOP.md
 ```
 
 ```bash
-npm test          # 367 tests
+npm test          # 362 tests
 npm run check     # validate your .env against the live APIs
 npm start         # run
 ```

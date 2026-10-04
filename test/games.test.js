@@ -1047,7 +1047,10 @@ test('dsmath follows the chat mode; all mode mixes levels and each card pays its
     assert.equal(scores.modeOf(GROUP), 'all', 'mixed mode persists like easy and hard');
 
     const seen = new Set();
-    for (const value of [0.01, 0.2, 0.4, 0.6, 0.8, 0.99]) {
+    // Evenly spaced draws, so the check stays meaningful however large the
+    // bank grows (a fixed half-dozen values can all land on one level).
+    const samples = Array.from({ length: 24 }, (_, i) => (i + 0.5) / 24);
+    for (const value of samples) {
         const one = world({ random: () => value });
         await one.games.handle(asAli('!game mode all'), ['mode', 'all']);
         await one.games.handle(asAli('!game dsmath'), ['dsmath']);
