@@ -73,8 +73,8 @@ export function idSet(...raws) {
 // 'viewonce' is a one-time message whose media WhatsApp withheld, so its real
 // type is unknowable; it is covered by any photo/video/audio rule anyway and
 // listed here so `GUARD_MEDIA=…viewonce` / `!flag x media=…viewonce` validate.
-export const GUARD_KINDS = ['sticker', 'image', 'video', 'gif', 'audio', 'document', 'link', 'viewonce', 'all'];
-export const DEFAULT_GUARD_MEDIA = Object.freeze(['sticker', 'image']);
+export const GUARD_KINDS = ['sticker', 'image', 'video', 'gif', 'audio', 'document', 'link', 'reaction', 'viewonce', 'all'];
+export const DEFAULT_GUARD_MEDIA = Object.freeze(['sticker', 'image', 'gif', 'reaction']);
 
 // ─── Companion (linked device) identity ──────────────────────────────────────
 /**

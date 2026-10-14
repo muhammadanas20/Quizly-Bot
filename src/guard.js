@@ -1,10 +1,11 @@
 /**
  * src/guard.js — silent media removal for flagged members.
  *
- * By default, a flagged member's stickers and photos (including view-once
- * photos) are revoked in groups where the bot is an admin. The bot says
- * NOTHING: no warning, reply, or replacement media. The only trace is one
- * debug line in the server console plus a counter you can read with !stats.
+ * By default, a flagged member's stickers, photos, GIFs and emoji reactions
+ * (including view-once photos) are revoked in groups where the bot is an admin.
+ * The bot says NOTHING: no warning, reply, or replacement media. The only
+ * trace is one debug line in the server console plus a counter you can read
+ * with !stats.
  *
  * One-time ("view once") media is the awkward case: WhatsApp only ships it to
  * phone-class linked devices. A web-class companion receives just an
@@ -22,7 +23,7 @@
 import { classifyKind, identitiesOf } from './message.js';
 import { DEFAULT_GUARD_MEDIA } from './config.js';
 
-const NOTHING_TO_DELETE = new Set(['system', 'reaction', 'unknown']);
+const NOTHING_TO_DELETE = new Set(['system', 'unknown']);
 
 /**
  * What a one-time message could be hiding. WhatsApp only allows view-once for
