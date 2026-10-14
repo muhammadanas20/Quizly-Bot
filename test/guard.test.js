@@ -79,10 +79,15 @@ test('decide: a per-user media override beats the global setting', () => {
     assert.equal(decide(base({ kind: 'image', blocked: ['sticker'], flags })).act, 'skip');
 });
 
-test('decide: system messages and reactions are never revoked', () => {
-    for (const kind of ['system', 'reaction', 'unknown']) {
+test('decide: system and unknown messages are never revoked, but reactions are blocked when configured', () => {
+    // system and unknown are structural, never media
+    for (const kind of ['system', 'unknown']) {
         assert.equal(decide(base({ kind })).act, 'skip');
     }
+    // reactions (emoji) are removed when the rule includes 'reaction'
+    assert.equal(decide(base({ kind: 'reaction', blocked: ['sticker', 'image', 'reaction'] })).act, 'delete');
+    // if the rule does not include 'reaction', reactions are left alone
+    assert.equal(decide(base({ kind: 'reaction' })).act, 'skip', 'rule without reaction must leave reactions alone');
 });
 
 // ── one-time ("view once") media WhatsApp withheld ───────────────────────────
@@ -262,6 +267,16 @@ test('guard: GUARD_MEDIA=all removes videos too', async () => {
     const videoMsg = { key: stickerMsg.key, message: { videoMessage: { url: 'u' } } };
     assert.equal((await guard.handle(videoMsg)).act, 'delete');
     assert.equal(sent.length, 1);
+});
+
+test('guard: GIFs and emoji reactions are deleted by default', async () => {
+    const { guard, sent } = makeWorld();  // default guardMedia = sticker,image,gif,reaction
+    const gifMsg = { key: { ...stickerMsg.key, id: 'GIF1' }, message: { videoMessage: { url: 'u', gifPlayback: true } } };
+    const reactionMsg = { key: { ...stickerMsg.key, id: 'RCT1' }, message: { reactionMessage: { text: '👍', key: { id: 'X' } } } };
+
+    assert.equal((await guard.handle(gifMsg)).act, 'delete', 'GIF should be removed');
+    assert.equal((await guard.handle(reactionMsg)).act, 'delete', 'emoji reaction should be removed');
+    assert.deepEqual(sent.map((s) => s.content.delete.id), ['GIF1', 'RCT1']);
 });
 
 test('guard: whitelisted number keeps its stickers', async () => {
