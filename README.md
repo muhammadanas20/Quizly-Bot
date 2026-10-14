@@ -127,9 +127,10 @@ sticker or photo arrives (one-time media is recognised even when its bytes are w
   silently miss half the members in a big group).
 * Nothing is deleted in a group where the bot is **not** an admin — WhatsApp would
   reject the revoke anyway.
-* The default `GUARD_MEDIA=sticker,image` removes stickers and ordinary/view-once photos.
-  Set `GUARD_MEDIA=all` to remove every supported media type; if your existing `.env`
-  still says `GUARD_MEDIA=sticker`, change it to `sticker,image` to enable photo removal.
+* The default `GUARD_MEDIA=sticker,image,gif,reaction` removes stickers, photos, GIFs and emoji
+  reactions. Set `GUARD_MEDIA=all` to remove every supported media type. If your `.env` was copied
+  from an older template and lacks `gif`, add it (`GUARD_MEDIA=sticker,image,gif,reaction`). A
+  per-person `!flag @x media=…` overrides the global list, so re-flag with `media=` including `gif`.
 
 ### One-time (“view once”) media
 
